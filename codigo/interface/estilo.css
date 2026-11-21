@@ -169,6 +169,18 @@ h2 { font-size: 26px; color: var(--palha-hi); margin-bottom: 6px; }
 #btnSom[aria-pressed="false"] .i-on { display: none; }
 #btnSom[aria-pressed="false"] .i-off { display: block; }
 
+/* ---------- painel de som ---------- */
+.linha-fantasma { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-efeitos { width: 100%; }
+.btn-efeitos[aria-pressed="false"] { opacity: .7; text-decoration: line-through; }
+.volume { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px 48px; align-items: center; gap: 8px; }
+.btn-vol { min-height: 52px; padding: 0; font-size: 26px; line-height: 1; }
+.volume input[type="range"] { width: 100%; min-width: 0; height: 44px; accent-color: var(--uru-hi); }
+.volume output { text-align: right; font-weight: 800; color: var(--palha-hi); }
+.credito-som { font-size: 12px; }
+.credito-som a { color: var(--palha-2); }
+.btn-ok-som { width: 100%; margin-top: 14px; }
+
 /* ---------- sobreposições (menu, regras, vitória) ---------- */
 .sobre {
   position: fixed; inset: 0; z-index: 10;

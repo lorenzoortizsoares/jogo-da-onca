@@ -3,7 +3,7 @@
    Sem conta: as mensagens passam por um servidor MQTT público gratuito
    (com um segundo servidor de reserva). Só os lances trafegam.
 
-   Tópicos (PREFIXO + CÓDIGO + '/...'):
+   Tópicos (PREFIXO + RESUMO-DO-CÓDIGO + '/...'; toda mensagem leva "mac", a assinatura HMAC):
      sala      (retido)  { v, criador:{id,lado}, convidado:{id}|null, status, servidor }
      estado    (retido)  { partida, seq, estado, lance, autor }
      pedido              { tipo:'entrar'|'cheia'|'revanche'|'revanche-resposta'|'sair', id, ... }
@@ -13,7 +13,13 @@
 (function (root) {
   'use strict';
 
-  var PREFIXO = 'jogodaonca-lz/v1/';
+  // v2 (REG-010): o código da sala NÃO aparece mais no servidor. O tópico é um resumo do código
+  // (PBKDF2) e toda mensagem leva uma assinatura (HMAC) com chave tirada do código, que só os dois
+  // jogadores conhecem. Antes, quem escutasse o servidor inteiro via o código e podia trocar a chave
+  // do chat (lendo as mensagens) ou injetar um tabuleiro falso.
+  var PREFIXO = 'jogodaonca-lz/v2/';
+  var ITERACOES_SALA = 100000;
+  var SAL_SALA = 'jogo-da-onca/sala/v2';
   var ALFABETO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // sem 0/O, 1/I/L (evita confusão ao digitar)
   var SERVIDORES = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
   var MQTT_JS = 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';
@@ -60,6 +66,81 @@
   function formatarCodigo(c) { return c ? c.slice(0, 3) + '-' + c.slice(3) : ''; }
   function oposto(lado) { return lado === 'J' ? 'D' : 'J'; }
   function copia(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+
+  // ------------------------------------------------------------------ assinatura das mensagens (HMAC-SHA256)
+  // Síncrono de propósito (JavaScript puro): assim a ordem das mensagens nunca embaralha.
+  var K256 = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+  function ror(x, n) { return (x >>> n) | (x << (32 - n)); }
+  function sha256(bytes) {
+    var l = bytes.length, nb = ((l + 9 + 63) >> 6) << 6, m = new Uint8Array(nb), i;
+    m.set(bytes); m[l] = 0x80;
+    var bits = l * 8, alto = Math.floor(bits / 4294967296);
+    m[nb - 8] = alto >>> 24; m[nb - 7] = (alto >>> 16) & 255; m[nb - 6] = (alto >>> 8) & 255; m[nb - 5] = alto & 255;
+    m[nb - 4] = bits >>> 24; m[nb - 3] = (bits >>> 16) & 255; m[nb - 2] = (bits >>> 8) & 255; m[nb - 1] = bits & 255;
+    var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    var w = new Array(64);
+    for (var off = 0; off < nb; off += 64) {
+      for (i = 0; i < 16; i++) w[i] = (m[off + 4 * i] << 24) | (m[off + 4 * i + 1] << 16) | (m[off + 4 * i + 2] << 8) | m[off + 4 * i + 3];
+      for (i = 16; i < 64; i++) {
+        var s0 = ror(w[i - 15], 7) ^ ror(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+        var s1 = ror(w[i - 2], 17) ^ ror(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (i = 0; i < 64; i++) {
+        var t1 = (h + (ror(e, 6) ^ ror(e, 11) ^ ror(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w[i]) | 0;
+        var t2 = ((ror(a, 2) ^ ror(a, 13) ^ ror(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    var out = new Uint8Array(32);
+    for (i = 0; i < 8; i++) { out[4 * i] = H[i] >>> 24; out[4 * i + 1] = (H[i] >>> 16) & 255; out[4 * i + 2] = (H[i] >>> 8) & 255; out[4 * i + 3] = H[i] & 255; }
+    return out;
+  }
+  function hex(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16); return s; }
+  function hmacHex(chave, texto) {
+    var k = new Uint8Array(64), msg = utf8(texto), i;
+    k.set(chave.length > 64 ? sha256(chave) : chave);
+    var dentro = new Uint8Array(64 + msg.length), fora = new Uint8Array(96);
+    for (i = 0; i < 64; i++) { dentro[i] = k[i] ^ 0x36; fora[i] = k[i] ^ 0x5c; }
+    dentro.set(msg, 64);
+    fora.set(sha256(dentro), 64);
+    return hex(sha256(fora));
+  }
+  // JSON com as chaves em ordem: o mesmo objeto vira sempre o mesmo texto (para assinar e conferir)
+  function canonico(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+    if (Array.isArray(v)) return '[' + v.map(canonico).join(',') + ']';
+    return '{' + Object.keys(v).filter(function (k) { return v[k] !== undefined; }).sort().map(function (k) { return JSON.stringify(k) + ':' + canonico(v[k]); }).join(',') + '}';
+  }
+  function assinatura(chave, sufixo, dados) { return hmacHex(chave, sufixo + '\n' + canonico(dados)); }
+  function iguais(a, b) {   // comparação sem atalho (tempo constante)
+    if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+    var r = 0; for (var i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return r === 0;
+  }
+  // código da sala -> { topico (resumo, o servidor nunca vê o código), chaveMac (assina as mensagens) }
+  function derivarSala(codigo, iteracoes) {
+    if (!criptoDisponivel()) return Promise.reject(new Error('navegador sem criptografia'));
+    var subtle = root.crypto.subtle;
+    return subtle.importKey('raw', utf8(codigo), 'PBKDF2', false, ['deriveBits'])
+      .then(function (k) { return subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: utf8(SAL_SALA), iterations: iteracoes || ITERACOES_SALA }, k, 384); })
+      .then(function (bits) {
+        var b = new Uint8Array(bits);
+        return { topico: PREFIXO + hex(b.slice(0, 16)) + '/', chaveMac: b.slice(16, 48) };
+      });
+  }
 
   // ------------------------------------------------------------------ biblioteca MQTT (carregada só quando precisa)
   var carregando = null;
@@ -150,6 +231,7 @@
           nome: 'memoria',
           conectar: function (id, opcoes) { c.will = opcoes && opcoes.will; c.ligado = true; depois(function () { c.aoEst(true); }); return Promise.resolve(); },
           publicar: function (t, obj, o) {
+            if (c.caido) return;   // como no servidor real: quem caiu não publica nada
             var msg = copia(obj);
             publicacoes.push({ topico: t, msg: copia(msg), opcoes: copia(o || {}) });
             if (o && o.reter) { if (msg == null) delete retidos[t]; else retidos[t] = msg; }
@@ -160,8 +242,8 @@
           aoConexao: function (cb) { c.aoEst = cb; },
           desconectar: function () { c.ligado = false; },
           // só para testes: queda de conexão (dispara o testamento) e volta
-          cair: function () { if (!c.ligado) return; c.ligado = false; if (c.will) entregar(c.will.topico, c.will.dados); c.aoEst(false); },
-          voltar: function () { c.ligado = true; c.aoEst(true); c.filtros.forEach(function (f) { entregarRetidos(c, f); }); }
+          cair: function () { if (!c.ligado) return; c.ligado = false; c.caido = true; if (c.will) entregar(c.will.topico, c.will.dados); c.aoEst(false); },
+          voltar: function () { c.ligado = true; c.caido = false; c.aoEst(true); c.filtros.forEach(function (f) { entregarRetidos(c, f); }); }
         };
         return tr;
       }
@@ -172,7 +254,8 @@
   // opcoes: { id, criarTransporte(indiceServidor) -> transporte, initialState() -> estado inicial,
   //           batidaMs (8000), ausenciaMs (20000), esperaSalaMs (4500) }
   function criarSala(opcoes) {
-    var o = Object.assign({ batidaMs: 8000, ausenciaMs: 20000, esperaSalaMs: 4500 }, opcoes || {});
+    // iteracoesSala: só os testes simulados usam menos (o "tempo virtual" do Chrome de teste não espera o PBKDF2)
+    var o = Object.assign({ batidaMs: 8000, ausenciaMs: 20000, esperaSalaMs: 4500, iteracoesSala: ITERACOES_SALA }, opcoes || {});
     var eventos = {};
     var s = {
       id: o.id || gerarId(), codigo: null, servidor: 0, transporte: null,
@@ -183,11 +266,24 @@
       chatRejeitadas: 0, filaChat: Promise.resolve(), geracaoChave: 0
     };
     function emitir(nome, dado) { (eventos[nome] || []).slice().forEach(function (cb) { cb(dado); }); }
-    function base() { return PREFIXO + s.codigo + '/'; }
+    function base() { return s.topico || ''; }
     function agora() { return Date.now(); }
+    // calcula o tópico e a chave de assinatura a partir do código (o servidor nunca vê o código)
+    function prepararSala() {
+      var codigo = s.codigo;
+      return derivarSala(codigo, o.iteracoesSala).then(function (d) {
+        if (s.codigo === codigo) { s.topico = d.topico; s.chaveMac = d.chaveMac; }
+      });
+    }
+    function assinar(sufixo, dados) {
+      if (dados == null) return dados;
+      var limpo = Object.assign({}, dados); delete limpo.mac;
+      limpo.mac = assinatura(s.chaveMac, sufixo, limpo);
+      return limpo;
+    }
     // retidos (sala, estado, chaves) expiram sozinhos; o resto é só "de passagem"
     function publicar(sufixo, dados, reter) {
-      if (s.transporte) s.transporte.publicar(base() + sufixo, dados, { reter: !!reter, expiraSeg: reter ? EXPIRA_RETIDO_SEG : EXPIRA_MSG_SEG });
+      if (s.transporte && s.chaveMac) s.transporte.publicar(base() + sufixo, assinar(sufixo, dados), { reter: !!reter, expiraSeg: reter ? EXPIRA_RETIDO_SEG : EXPIRA_MSG_SEG });
     }
 
     // ---- chaves do chat: cada aparelho gera um par só seu; a chave secreta nunca passa pelo servidor
@@ -261,8 +357,20 @@
     function ehJogador(id) { return !!s.info && ((s.info.criador && s.info.criador.id === id) || (s.info.convidado && s.info.convidado.id === id)); }
 
     function receber(topico, msg) {
-      if (s.encerrada || !msg || topico.indexOf(base()) !== 0) return;
+      if (s.encerrada || !msg || typeof msg !== 'object' || !s.topico || topico.indexOf(base()) !== 0) return;
       var resto = topico.slice(base().length);
+      // REG-010: sem a assinatura certa (de quem sabe o código), a mensagem é descartada
+      var dados = Object.assign({}, msg); delete dados.mac;
+      if (!s.chaveMac || !iguais(msg.mac, assinatura(s.chaveMac, resto, dados))) {
+        s.rejeitadas = (s.rejeitadas || 0) + 1;
+        if (resto === 'chat') s.chatRejeitadas++;
+        return;
+      }
+      tratar(resto, dados);
+    }
+    // mensagem já conferida (assinatura ok)
+    function tratar(resto, msg) {
+      if (s.encerrada) return;
       if (resto === 'sala') {
         var advAntes = idAdversario();
         s.info = msg;
@@ -275,7 +383,7 @@
         }
         emitir('sala', msg);
         // o estado pode ter chegado antes da sala: processa agora
-        if (s.estadoPendente) { var p = s.estadoPendente; s.estadoPendente = null; receber(base() + 'estado', p); }
+        if (s.estadoPendente) { var p = s.estadoPendente; s.estadoPendente = null; tratar('estado', p); }
         return;
       }
       if (resto === 'estado') {
@@ -294,7 +402,11 @@
         if (typeof msg.id !== 'string' || typeof msg.pub !== 'string' || msg.pub.length > 200 || msg.id === s.id || resto !== 'chave/' + msg.id) return;
         s.chavesRecebidas = s.chavesRecebidas || {};
         s.chavesRecebidas[msg.id] = msg.pub;
-        if (msg.id === idAdversario() && msg.pub !== s.pubAdv) { s.pubAdv = msg.pub; s.chaveChat = null; derivar(); }
+        if (msg.id === idAdversario() && msg.pub !== s.pubAdv) {
+          s.pubAdv = msg.pub; s.chaveChat = null; derivar();
+          // o adversário trocou de chave (recarregou): republico a minha, caso a guardada tenha sido apagada/sobrescrita
+          if (s.minhaPub) publicar('chave/' + s.id, { id: s.id, pub: s.minhaPub }, true);
+        }
         return;
       }
       if (resto === 'chat') {
@@ -362,7 +474,7 @@
         emitir('conexao', ok);
         if (ok) iniciarBatidas();
       });
-      return s.transporte.conectar(s.id, { will: { topico: base() + 'presenca/' + s.id, dados: { id: s.id, online: false } } })
+      return s.transporte.conectar(s.id, { will: { topico: base() + 'presenca/' + s.id, dados: assinar('presenca/' + s.id, { id: s.id, online: false }) } })
         .then(function () { s.transporte.assinar(base() + '#'); });
     }
     // tenta o servidor principal e, se falhar, o de reserva
@@ -389,6 +501,7 @@
     var api = {
       get id() { return s.id; },
       get codigo() { return s.codigo; },
+      get topico() { return s.topico; },     // resumo do código (é o que o servidor vê)
       get servidor() { return s.servidor; },
       get info() { return s.info; },
       get estado() { return s.estado; },
@@ -421,12 +534,12 @@
       // cria uma sala nova; quem cria escolhe o lado
       criar: function (lado, codigo) {
         s.codigo = codigo || gerarCodigo();
-        return ligarAlgum([0, 1]).then(function () {
+        return prepararSala().then(function () { return ligarAlgum([0, 1]); }).then(function () {
           s.info = { v: 1, criador: { id: s.id, lado: lado === 'J' ? 'J' : 'D' }, convidado: null, status: 'aguardando', servidor: s.servidor, t: agora() };
           publicar('sala', s.info, true);
           publicar('estado', null, true);   // limpa partida antiga com o mesmo código (improvável)
           prepararChave();
-          return { codigo: s.codigo };
+          return { codigo: s.codigo, topico: s.topico };
         });
       },
       // procura uma sala pelo código (no principal e depois no de reserva)
@@ -450,7 +563,7 @@
               };
             });
         };
-        return proximo();
+        return prepararSala().then(proximo);
       },
       // depois de consultar: o convidado aceita e entra
       entrar: function (tempoMs) {
@@ -510,6 +623,7 @@
         pararBatidas();
         // apaga os segredos do chat da memória
         s.par = null; s.chaveChat = null; s.minhaPub = null; s.pubAdv = null; s.chavesRecebidas = null;
+        if (s.chaveMac) s.chaveMac.fill(0);
         var tr = s.transporte; s.transporte = null;
         if (tr) setTimeout(function () { tr.desconectar(); }, 150);
       },
@@ -525,6 +639,7 @@
     gerarCodigo: gerarCodigo, gerarId: gerarId, normalizarCodigo: normalizarCodigo, codigoValido: codigoValido,
     formatarCodigo: formatarCodigo, oposto: oposto, casaTopico: casaTopico, limparTexto: limparTexto,
     criptoDisponivel: criptoDisponivel, paraB64: paraB64, deB64: deB64,
+    derivarSala: derivarSala, hmacHex: hmacHex, assinatura: assinatura, canonico: canonico,
     criarTransporteMqtt: criarTransporteMqtt, criarBrokerMemoria: criarBrokerMemoria, criarSala: criarSala,
     carregarMqtt: carregarMqtt
   };

@@ -33,6 +33,8 @@
 - Recarregar a página volta para a mesma sala e partida.
 - Conexão sem conta: servidor MQTT público gratuito (HiveMQ) com reserva (EMQX);
   só os lances trafegam.
+- Chat só no online: caixinha com as 4 últimas mensagens (canto inferior esquerdo), toque abre o chat completo; criptografia de ponta a ponta (ECDH + AES-GCM); apagado ao sair da sala.
+- Segurança (REG-010): o servidor nunca vê o código da sala (o canal é um resumo PBKDF2) e toda mensagem é assinada (HMAC) com chave tirada do código. Dados guardados no servidor expiram em 6 h e são apagados ao sair.
 
 ## Regras
 - Tabuleiro de 31 pontos: grade 5×5 (alquerque) + toca triangular.
@@ -45,7 +47,9 @@
 
 ## Sons
 Toc de madeira ao mover, latido na captura, rugido quando a onça vence (dois latidos
-quando os cachorros vencem). Botão de som (lembra a escolha).
+quando os cachorros vencem).
+Som ambiente da floresta em todas as telas: “Chaguaramal aves”, de Wilfredor (Wikimedia Commons, CC BY-SA 3.0, crédito na tela inicial e no painel Som).
+Botão **Som** (barra da partida e tela inicial) abre o painel: efeitos liga/desliga e volume da floresta com − / + (0 a 100%, começa em 50%); tudo fica salvo no aparelho.
 
 ## Publicação
 GitHub Pages: https://lorenzoortizsoares.github.io/jogo-da-onca/ (repositório público

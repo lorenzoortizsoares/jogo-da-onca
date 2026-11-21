@@ -97,6 +97,20 @@ Get-ChildItem (Join-Path $raiz 'codigo') -Recurse -File -Include *.js, *.html, *
 }
 Registrar 'Varredura do código: sem caracteres invisíveis que quebram o JavaScript' ($invisiveis.Count -eq 0) ($(if ($invisiveis.Count) { 'Arquivos com U+2028/U+2029: ' + ($invisiveis -join ', ') } else { 'ok' }))
 
+# 1c) REG-009: o download do som ambiente chegou a salvar uma PÁGINA HTML de erro (429) como ambiente.mp3.
+# Todo .mp3 em assets/sons precisa ser áudio MP3 de verdade (cabeçalho ID3 ou quadro MPEG), não texto/HTML.
+$sonsRuins = @(); $sonsOk = @()
+Get-ChildItem (Join-Path $raiz 'assets\sons') -File -Filter *.mp3 -ErrorAction SilentlyContinue | ForEach-Object {
+  $b = [System.IO.File]::ReadAllBytes($_.FullName)
+  $inicioTxt = [System.Text.Encoding]::ASCII.GetString($b, 0, [Math]::Min(512, $b.Length)).ToLower()
+  $id3 = $b.Length -gt 3 -and $b[0] -eq 0x49 -and $b[1] -eq 0x44 -and $b[2] -eq 0x33
+  $quadro = $b.Length -gt 2 -and $b[0] -eq 0xFF -and (($b[1] -band 0xE0) -eq 0xE0)
+  if ((-not ($id3 -or $quadro)) -or $b.Length -lt 20000 -or $inicioTxt.Contains('<html') -or $inicioTxt.Contains('<!doctype')) { $sonsRuins += "$($_.Name) ($($b.Length) bytes)" }
+  else { $sonsOk += "$($_.Name) ($([Math]::Round($b.Length / 1024)) KB)" }
+}
+$detSom = if ($sonsRuins.Count) { 'Não são MP3 de verdade: ' + ($sonsRuins -join ', ') } elseif ($sonsOk.Count) { 'ok: ' + ($sonsOk -join ', ') } else { 'nenhum .mp3 ainda (o jogo segue sem som ambiente)' }
+Registrar 'REG-009 sons em assets/sons são MP3 de verdade (não página de erro)' ($sonsRuins.Count -eq 0) $detSom
+
 # 2) back end: regras + computador (IA)
 # REG-005: no "tempo virtual" do Chrome sem janela o relógio dispara quando a página fica ociosa;
 # com orçamento pequeno os testes do Worker não terminavam. 4.000.000 ms virtuais ≈ 25 s reais.
@@ -111,7 +125,8 @@ if ($falhasLogica) { $det += "`n$falhasLogica" }
 Registrar 'Back end: regras e computador (testes-logica.html)' $okLogica $det
 
 # 2b) online: protocolo da sala com servidor simulado (sem internet)
-$dom = Chrome-Dom (Url 'testes\online\testes-online.html') '1000,800' 120000
+# REG-012: com a assinatura (HMAC) e o PBKDF2 o protocolo precisa de mais "tempo virtual" (mesmo orçamento da REG-005)
+$dom = Chrome-Dom (Url 'testes\online\testes-online.html') '1000,800' 4000000
 $txt = Decodificar ([regex]::Match($dom, '(?s)<pre id="out"[^>]*>(.*?)</pre>').Groups[1].Value)
 $res = [regex]::Match($txt, 'RESUMO: (\d+) passaram, (\d+) falharam')
 $okOn = $res.Success -and ([int]$res.Groups[2].Value -eq 0) -and ($txt -match '\[FIM\]')

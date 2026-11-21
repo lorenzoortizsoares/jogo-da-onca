@@ -478,7 +478,7 @@ function novaPartida(estado) {
   pedido++;
   S = estado || L.initialState();
   hist = []; chaves = [L.positionKey(S)];
-  sel = -1; cadeia = false; fim = null; ocupado = false; hover = -1;
+  sel = -1; cadeia = false; fim = null; ocupado = false; hover = -1; lanceTurno = null;
   $('vitoria').hidden = true;
   caes.forEach((d) => { d.userData.point = -1; });
   sincronizar(); desenharMarcadores(); atualizarHud();
@@ -579,7 +579,7 @@ function trocarVista() {
   toast(NOME_VISTA[vistaAtual]);
 }
 function abrir(id) { $(id).hidden = false; const b = $(id).querySelector('button'); if (b) b.focus(); }
-function fecharSobreposicoes() { ['menu', 'regras', 'chat'].forEach((id) => { $(id).hidden = true; }); }
+function fecharSobreposicoes() { ['menu', 'regras', 'chat', 'painelSom'].forEach((id) => { $(id).hidden = true; }); }
 function irParaInicio() {
   pedido++; ocupado = false; fecharSobreposicoes(); fecharAviso(); $('vitoria').hidden = true;
   if (sala) { sala.sair(); sala = null; esquecerSessao(); }
@@ -653,7 +653,8 @@ function novaSessao() {
 
 // chegou um estado da partida (meu eco, lance do adversário, nova partida ou reconexão)
 async function aoEstadoOnline({ msg }) {
-  if (cfg.mode !== 'online' || !sala || !sala.meuLado || !msg || !msg.estado) return;
+  if (cfg.mode !== 'online' || !sala || !sala.meuLado || !msg || !estadoValido(msg.estado)) return;   // REG-011
+  if (!Number.isInteger(msg.partida) || !Number.isInteger(msg.seq)) return;
   if (msg.partida !== partidaOnline) {                  // primeira partida, revanche ou volta à sala
     partidaOnline = msg.partida; seqOnline = msg.seq;
     fecharAviso(); $('vitoria').hidden = true;
@@ -668,6 +669,7 @@ async function aoEstadoOnline({ msg }) {
   seqOnline = msg.seq;
   if (!esperado) {                                      // fora de ordem: sincroniza direto
     pedido++; S = L.cloneState(msg.estado); ocupado = false; cadeia = false; sel = -1;
+    lanceTurno = null;                                  // nunca reenviar um lance meu que ficou pela metade
     sincronizar(); fimDoTurno();
     return;
   }
@@ -676,6 +678,16 @@ async function aoEstadoOnline({ msg }) {
   if (!(await executarLance(msg.lance, meu))) return;
   ocupado = false;
   fimDoTurno();
+}
+// REG-011: um estado vindo da rede precisa ser um tabuleiro possível (senão o jogo quebraria ao desenhar)
+function estadoValido(e) {
+  if (!e || typeof e !== 'object' || !Array.isArray(e.board) || e.board.length !== L.N) return false;
+  if (e.turn !== 'J' && e.turn !== 'D') return false;
+  if (!Number.isInteger(e.captured) || e.captured < 0 || e.captured > 14) return false;
+  if (!Number.isInteger(e.jaguar) || e.jaguar < 0 || e.jaguar >= L.N || e.board[e.jaguar] !== 2) return false;
+  let caes = 0, oncas = 0;
+  for (const v of e.board) { if (v === 1) caes++; else if (v === 2) oncas++; else if (v !== 0) return false; }
+  return oncas === 1 && caes === 14 - e.captured;
 }
 function lanceConfere(estado, lance, alvo) {
   try { const r = L.applyMove(estado, lance); return L.positionKey(r) === L.positionKey(alvo) && r.captured === alvo.captured; } catch (e) { return false; }
@@ -818,41 +830,84 @@ $('btnTrocar').onclick = () => {
 $('btnDesfazer').onclick = desfazer;
 $('btnParar').onclick = encerrarCadeia;
 $('btnCamera').onclick = trocarVista;
-// ---- som ambiente de floresta (gravação real escolhida pelo usuário em assets/sons/ambiente.mp3)
-// Toca em laço, bem baixinho, em todas as telas; segue o botão Som; pausa com a aba escondida.
-const AMBIENTE_VOLUME = 0.22;
+// ---- som ambiente de floresta: "Chaguaramal aves" (Wilfredor, CC BY-SA 3.0), em assets/sons/ambiente.mp3
+// Toca em laço em todas as telas, com volume próprio (painel Som: − / +); pausa com a aba escondida.
+// O volume é independente dos efeitos (toc, latidos, rugido), que têm o seu liga/desliga.
+const AMBIENTE_MAX = 0.44;                 // volume no 100% (50% = 0,22, o "bem baixinho" combinado)
 const ambiente = new Audio();
-ambiente.loop = true; ambiente.preload = 'none'; ambiente.volume = 0;
+ambiente.loop = true; ambiente.preload = 'none';
 ambiente.src = 'assets/sons/ambiente.mp3';
-let ambienteLiberado = false, timerFade = 0;
-ambiente.addEventListener('error', () => { ambienteLiberado = false; });   // sem arquivo: o jogo segue sem ambiente
+let nivelFloresta = guardar.ler('floresta', 50);
+if (typeof nivelFloresta !== 'number' || !(nivelFloresta >= 0 && nivelFloresta <= 100)) nivelFloresta = 50;
+nivelFloresta = Math.round(nivelFloresta / 10) * 10;
+let ambienteLiberado = false, ambienteFalhou = false, timerFade = 0, ganhoAtual = 0;
+// No iPhone o volume de um <audio> não muda por código; com Web Audio (ganho) muda em todo lugar.
+// Aberto direto do PC (file://) o Web Audio fica mudo com arquivo local, então lá usa o volume comum.
+let ctxAmb = null, ganhoAmb = null;
+function prepararGanho() {
+  if (ctxAmb || !/^https?:$/.test(location.protocol)) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctxAmb = new AC();
+    ganhoAmb = ctxAmb.createGain(); ganhoAmb.gain.value = 0;
+    ctxAmb.createMediaElementSource(ambiente).connect(ganhoAmb).connect(ctxAmb.destination);
+  } catch (e) { ctxAmb = null; ganhoAmb = null; }
+}
+function aplicarGanho(v) {
+  ganhoAtual = v;
+  if (ganhoAmb) { ganhoAmb.gain.value = v; ambiente.volume = 1; } else ambiente.volume = Math.max(0, Math.min(1, v));
+}
+const alvoAmbiente = () => AMBIENTE_MAX * nivelFloresta / 100;
+ambiente.addEventListener('error', () => { ambienteFalhou = true; });   // sem arquivo: o jogo segue sem ambiente
 function atualizarAmbiente() {
-  const tocar = ambienteLiberado && !!audio && !audio.isMuted() && !document.hidden;
+  const tocar = ambienteLiberado && !ambienteFalhou && nivelFloresta > 0 && !document.hidden;
   clearInterval(timerFade);
   if (tocar) {
-    if (ambiente.paused) { const p = ambiente.play(); if (p && p.catch) p.catch(() => {}); }
-    timerFade = setInterval(() => {                         // entra devagar (~2 s)
-      ambiente.volume = Math.min(AMBIENTE_VOLUME, ambiente.volume + AMBIENTE_VOLUME / 20);
-      if (ambiente.volume >= AMBIENTE_VOLUME) clearInterval(timerFade);
-    }, 100);
+    if (ctxAmb && ctxAmb.state === 'suspended') ctxAmb.resume().catch(() => {});
+    if (ambiente.paused) { aplicarGanho(0); const p = ambiente.play(); if (p && p.catch) p.catch(() => {}); }
+    const alvo = alvoAmbiente(), passo = AMBIENTE_MAX / 20;
+    timerFade = setInterval(() => {                         // entra (ou muda de volume) devagar
+      const v = ganhoAtual < alvo ? Math.min(alvo, ganhoAtual + passo) : Math.max(alvo, ganhoAtual - passo);
+      aplicarGanho(v);
+      if (v === alvo) clearInterval(timerFade);
+    }, 60);
   } else {
-    ambiente.volume = 0;
+    aplicarGanho(0);
     if (!ambiente.paused) ambiente.pause();
   }
 }
 // navegadores só deixam tocar som depois do primeiro toque do usuário
-const liberarAmbiente = () => { if (!ambienteLiberado && !SELFTEST) { ambienteLiberado = true; atualizarAmbiente(); } };
+const liberarAmbiente = () => { if (!ambienteLiberado && !SELFTEST) { ambienteLiberado = true; prepararGanho(); atualizarAmbiente(); } };
 document.addEventListener('pointerdown', liberarAmbiente, { capture: true });
 document.addEventListener('keydown', liberarAmbiente, { capture: true });
 document.addEventListener('visibilitychange', atualizarAmbiente);
 
-function atualizarBotaoSom() {
-  const mudo = audio ? audio.isMuted() : true;
-  $('btnSom').setAttribute('aria-pressed', String(!mudo));
-  $('btnSom').querySelector('span').textContent = mudo ? 'Sem som' : 'Som';
+function mudarFloresta(n) {
+  nivelFloresta = Math.max(0, Math.min(100, Math.round(n / 10) * 10));
+  guardar.gravar('floresta', nivelFloresta);
+  atualizarPainelSom(); atualizarAmbiente();
 }
-$('btnSom').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarBotaoSom(); atualizarAmbiente(); if (!audio.isMuted()) som('toc', 0.8); };
-atualizarBotaoSom();
+function atualizarPainelSom() {
+  const mudo = audio ? audio.isMuted() : true;
+  $('btnEfeitos').setAttribute('aria-pressed', String(!mudo));
+  $('btnEfeitos').textContent = mudo ? 'Efeitos desligados' : 'Efeitos ligados';
+  $('btnEfeitos').disabled = !audio;
+  $('volFloresta').value = String(nivelFloresta);
+  $('volFlorestaTxt').textContent = nivelFloresta ? nivelFloresta + '%' : 'Sem';
+  $('btnFlorestaMenos').disabled = nivelFloresta <= 0;
+  $('btnFlorestaMais').disabled = nivelFloresta >= 100;
+  // ícone da barra: "Sem som" só quando os efeitos E a floresta estão desligados
+  const tudoMudo = mudo && nivelFloresta === 0;
+  $('btnSom').setAttribute('aria-pressed', String(!tudoMudo));
+  $('btnSom').querySelector('span').textContent = tudoMudo ? 'Sem som' : 'Som';
+}
+$('btnSom').onclick = () => { som('unlock'); atualizarPainelSom(); abrir('painelSom'); };
+$('btnEfeitos').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarPainelSom(); if (!audio.isMuted()) som('toc', 0.8); };
+$('btnFlorestaMenos').onclick = () => mudarFloresta(nivelFloresta - 10);
+$('btnFlorestaMais').onclick = () => mudarFloresta(nivelFloresta + 10);
+$('volFloresta').addEventListener('input', () => mudarFloresta(Number($('volFloresta').value)));
+atualizarPainelSom();
 
 // ---------------------------------------------------------------- ganchos de teste
 function posTela(i) {
@@ -910,6 +965,7 @@ if (SELFTEST) {
   if (qs.get('demo') === 'win') terminar('J');
   if (qs.get('tela') === 'menu') abrir('menu');
   if (qs.get('tela') === 'regras') abrir('regras');
+  if (qs.get('tela') === 'som') abrir('painelSom');
 } else if (qs.has('sala')) {
   // convite: ?sala=CÓDIGO (abre direto a confirmação; se este aparelho já está na sala, volta para a partida)
   irParaOnline('entrar');
@@ -962,6 +1018,39 @@ async function autoteste() {
     for (let k = 0; k < 3; k++) { $('btnCamera').click(); await dormir(900); vistas.push([vistaAtual, Math.round(anguloAtual().el)]); }
     check('câmera: botão alterna normal → lado oposto → de cima → normal', JSON.stringify(vistas) === JSON.stringify([['oposta', 35], ['cima', 90], ['normal', 35]]), vistas);
     check('câmera: aviso com o nome da visão', !$('toast').hidden && $('toast').textContent === 'Visão normal', $('toast').textContent);
+
+    // painel Som: efeitos liga/desliga e volume do som da floresta com − e + (pedido do usuário)
+    const florestaAntes = nivelFloresta, mudoAntes = audio ? audio.isMuted() : true;
+    mudarFloresta(50);
+    $('btnSom').click(); await dormir(30);
+    check('som: botão Som abre o painel', !$('painelSom').hidden);
+    check('REG-002 layout: painel de som cabe na tela', vazamentos().length === 0 && (() => { const r = $('painelSom').querySelector('.gaveta').getBoundingClientRect(); return r.left >= -1 && r.right <= document.documentElement.clientWidth + 1; })(), vazamentos());
+    $('btnFlorestaMenos').click(); $('btnFlorestaMenos').click();
+    check('som: "−" diminui o som da floresta (50% → 30%) e guarda no aparelho', nivelFloresta === 30 && $('volFloresta').value === '30' && $('volFlorestaTxt').textContent === '30%' && guardar.ler('floresta', null) === 30 && Math.abs(alvoAmbiente() - AMBIENTE_MAX * 0.3) < 1e-9,
+      { nivel: nivelFloresta, txt: $('volFlorestaTxt').textContent });
+    $('btnFlorestaMais').click();
+    check('som: "+" aumenta o som da floresta (30% → 40%)', nivelFloresta === 40);
+    for (let k = 0; k < 6; k++) $('btnFlorestaMenos').click();
+    check('som: no 0 a floresta desliga e o "−" fica travado', nivelFloresta === 0 && $('volFlorestaTxt').textContent === 'Sem' && $('btnFlorestaMenos').disabled && ambiente.paused && ganhoAtual === 0);
+    $('volFloresta').value = '100'; $('volFloresta').dispatchEvent(new Event('input'));
+    check('som: o controle deslizante também muda o volume (100%, "+" travado)', nivelFloresta === 100 && $('btnFlorestaMais').disabled && $('volFlorestaTxt').textContent === '100%');
+    if (audio) {
+      audio.setMuted(false); atualizarPainelSom();
+      $('btnEfeitos').click();
+      check('som: botão de efeitos desliga só os efeitos (a floresta continua)', audio.isMuted() && $('btnEfeitos').getAttribute('aria-pressed') === 'false' && nivelFloresta === 100 && $('btnSom').getAttribute('aria-pressed') === 'true');
+      mudarFloresta(0);
+      check('som: barra mostra "Sem som" só com efeitos e floresta desligados', $('btnSom').getAttribute('aria-pressed') === 'false' && $('btnSom').textContent.trim() === 'Sem som');
+      $('btnEfeitos').click();
+      check('som: efeitos voltam a ligar', !audio.isMuted() && $('btnSom').getAttribute('aria-pressed') === 'true');
+      audio.setMuted(mudoAntes);
+    }
+    const credito = $('painelSom').querySelector('.credito-som');
+    check('som: crédito da gravação (licença CC BY-SA 3.0) no painel e na tela inicial',
+      /Wilfredor/.test(credito.textContent) && /CC BY-SA 3\.0/.test(credito.textContent) && credito.querySelector('a[href*="creativecommons.org/licenses/by-sa/3.0"]') && credito.querySelector('a[href*="Chaguaramal_aves"]') &&
+      /Wilfredor.*CC BY-SA 3\.0/.test(document.querySelector('#telaInicio .credito').textContent));
+    $('painelSom').querySelector('[data-fechar]').click(); await dormir(30);
+    check('som: "Pronto" fecha o painel', $('painelSom').hidden);
+    mudarFloresta(florestaAntes);
 
     // onça anda 12 -> 17
     clicarPonto(12); clicarPonto(17); await ocioso();
@@ -1036,8 +1125,8 @@ async function autoteste() {
     // ONLINE (servidor simulado em memória + adversário robô; o caminho da tela é o real)
     const broker = ON.criarBrokerMemoria();
     fabricaTransporte = () => broker.criarTransporte();
-    opcoesSala = { batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300 };
-    const robo = (id) => ON.criarSala({ id, criarTransporte: () => broker.criarTransporte(), initialState: () => L.initialState(), batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300 });
+    opcoesSala = { batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 };   // REG-012
+    const robo = (id) => ON.criarSala({ id, criarTransporte: () => broker.criarTransporte(), initialState: () => L.initialState(), batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 });
     irParaInicio();
     $('btnModoOnline').click(); $('btnCriarSala').click();
     document.querySelector('[data-lado-online="J"]').click();
@@ -1072,7 +1161,7 @@ async function autoteste() {
     const noServidor = broker.publicacoes.filter((p) => p.topico.endsWith('/chat'));
     check('cripto: no servidor só passa texto embaralhado (sem o texto, sem nomes)', noServidor.length >= 1 && noServidor.every((p) => {
       const bruto = JSON.stringify(p.msg);
-      return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
+      return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv,mac' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
     }), noServidor.map((p) => p.msg));
     await conv.enviarChat('<img src=x onerror="window.__xss=1"><b>oi</b>');
     await esperar(() => historicoChat.length === 2, 3000);
@@ -1104,18 +1193,23 @@ async function autoteste() {
     intruso.fechar();
     // mensagem falsa de estranho é ignorada
     const antes = L.positionKey(S);
-    broker.criarTransporte().publicar(ON.PREFIXO + codigo + '/estado', { partida: 1, seq: 99, estado: L.initialState(), lance: null, autor: 'robo-intruso' }, { reter: false });
+    broker.criarTransporte().publicar(conv.topico + 'estado', { partida: 1, seq: 99, estado: L.initialState(), lance: null, autor: 'robo-intruso' }, { reter: false });
     await dormir(80);
     check('online: estado falso de estranho é ignorado', L.positionKey(S) === antes && seqOnline === 2);
-    // captura em cadeia vai inteira para o adversário
+    // REG-011: o adversário (com assinatura válida) manda um tabuleiro impossível: é ignorado e nada quebra
+    const errosAntes = window.__errors.length;
+    conv.jogar({ type: 'dog', from: 16, to: 11 }, Object.assign({}, L.initialState(), { board: [1, 2, 3], jaguar: 1 }));
+    await dormir(120);
+    check('REG-011 tabuleiro impossível vindo da rede é ignorado (sem travar)', L.positionKey(S) === antes && seqOnline === 2 && !ocupado && window.__errors.length === errosAntes, { seq: seqOnline, erros: window.__errors.slice(errosAntes) });
+    // captura em cadeia vai inteira para o adversário (o seq 3 acima foi descartado: agora é o 4)
     const b3 = new Array(L.N).fill(0);
     [17, 7, 0, 1, 3, 4, 5, 6, 8, 9, 10, 11, 13, 14].forEach((i) => { b3[i] = 1; });
     b3[22] = 2;
     const posC = Object.assign({}, L.initialState(), { board: b3, jaguar: 22, captured: 0, turn: 'J', ply: 10 });
     conv.jogar({ type: 'dog', from: 16, to: 11 }, posC);   // força a posição (lance não confere -> sincroniza)
-    await esperar(() => S.jaguar === 22 && seqOnline === 3, 2000);
+    await esperar(() => S.jaguar === 22 && seqOnline === 4, 2000);
     clicarPonto(22); clicarPonto(12); await ocioso(); clicarPonto(2); await ocioso();
-    await esperar(() => conv.estado && conv.estado.seq === 4, 2000);
+    await esperar(() => conv.estado && conv.estado.seq === 5, 2000);
     check('online: captura em cadeia chega inteira (2 pulos)', conv.estado && conv.estado.lance.type === 'capture' && conv.estado.lance.captured.length === 2 && conv.estado.estado.captured === 2, conv.estado && conv.estado.lance);
     // adversário cai e volta
     conv._transporte().cair();
@@ -1132,7 +1226,7 @@ async function autoteste() {
     check('online: "Ir para o início" fecha a sala', !$('telaInicio').hidden && sala === null);
     check('privacidade: ao sair, o chat some do aparelho', historicoChat.length === 0 && $('chatLista').children.length === 0 && $('miniLista').children.length === 0);
     await dormir(50);
-    const sobras = Object.keys(broker.retidos).filter((k) => k.indexOf(ON.PREFIXO + codigo + '/') === 0);
+    const sobras = Object.keys(broker.retidos).filter((k) => k.indexOf(conv.topico) === 0);
     check('privacidade: ao sair, nada da sala fica guardado no servidor', sobras.length === 0, sobras);
     // entrar pelo código: código inválido avisa
     irParaOnline('entrar'); $('campoCodigo').value = 'XX'; $('btnBuscarSala').click(); await dormir(30);

@@ -18,10 +18,12 @@
   function registrar(nome, cond, info) {
     if (cond) ok++; else falhas++;
     linhas.push((cond ? 'PASS  ' : 'FAIL  ') + nome + (info !== undefined && !cond ? '  -- ' + JSON.stringify(info) : ''));
+    mostrar(false);   // progresso visível: se travar, o relatório mostra até onde chegou
   }
   function mostrar(fim) {
     document.getElementById('out').textContent = 'RESUMO: ' + ok + ' passaram, ' + falhas + ' falharam' + (fim ? '  [FIM]' : '') + '\n' + linhas.join('\n');
   }
+  var ITER = 1000;   // PBKDF2 curto: o tempo virtual do Chrome de teste não espera as 100 mil rodadas (REG-012)
   var dormir = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
   function esperar(cond, ms) {
     var t0 = Date.now();
@@ -31,7 +33,7 @@
   }
   function nova(broker, id) {
     return ON.criarSala({ id: id, criarTransporte: function () { return broker.criarTransporte(); }, initialState: function () { return L.initialState(); },
-      batidaMs: 100, ausenciaMs: 450, esperaSalaMs: 200 });
+      batidaMs: 100, ausenciaMs: 450, esperaSalaMs: 200, iteracoesSala: ITER });
   }
 
   // ---- códigos
@@ -74,10 +76,29 @@
 
       // estranho tentando publicar um estado é ignorado
       var falso = b.criarTransporte();
-      falso.publicar(ON.PREFIXO + r.codigo + '/estado', { partida: 1, seq: 50, estado: L.initialState(), lance: null, autor: 'intruso' }, { reter: true });
+      var estadoBom = JSON.parse(JSON.stringify(b.retidos[r.topico + 'estado']));
+      falso.publicar(r.topico + 'estado', { partida: 1, seq: 50, estado: L.initialState(), lance: null, autor: 'intruso' }, { reter: true });
+      // REG-010: mesmo fingindo ser o jogador A (id certo), sem saber o código a assinatura não confere
+      falso.publicar(r.topico + 'estado', { partida: 1, seq: 51, estado: L.initialState(), lance: null, autor: 'jogA', mac: ON.assinatura(new Uint8Array(32), 'estado', { partida: 1, seq: 51, estado: L.initialState(), lance: null, autor: 'jogA' }) }, { reter: true });
       await dormir(40);
-      registrar('segurança: estado publicado por estranho é ignorado', A.estado.seq === 1 && B.estado.seq === 1);
-      falso.publicar(ON.PREFIXO + r.codigo + '/estado', { partida: 1, seq: 1, estado: s1, lance: { type: 'step', from: 12, to: 17 }, autor: 'jogA' }, { reter: true });   // restaura o retido
+      registrar('segurança: estado publicado por estranho é ignorado (mesmo fingindo ser o jogador)', A.estado.seq === 1 && B.estado.seq === 1);
+      falso.publicar(r.topico + 'estado', estadoBom, { reter: true });   // restaura o retido (o servidor público deixa sobrescrever)
+
+      // REG-010: o código da sala não aparece em nenhum lugar do servidor
+      var vazou = b.publicacoes.filter(function (p) { return p.topico.indexOf(r.codigo) >= 0 || JSON.stringify(p.msg).indexOf(r.codigo) >= 0; });
+      registrar('REG-010: o código da sala nunca aparece no servidor (o tópico é um resumo)', vazou.length === 0 && r.topico.indexOf(r.codigo) < 0 && /^jogodaonca-lz\/v2\/[0-9a-f]{32}\/$/.test(r.topico), { topico: r.topico, vazou: vazou.length });
+      var mesmo = await ON.derivarSala(r.codigo, ITER), outro = await ON.derivarSala(r.codigo === 'ABCDEF' ? 'ABCDEG' : 'ABCDEF', ITER);
+      registrar('REG-010: mesmo código = mesmo tópico; código diferente = outro tópico', mesmo.topico === r.topico && outro.topico !== r.topico);
+      // a assinatura (HMAC-SHA256 em JavaScript puro) confere com a do navegador (Web Crypto)
+      var hmacOk = true;
+      for (var hk = 0; hk < 4; hk++) {
+        var chaveT = crypto.getRandomValues(new Uint8Array(32)), textoT = 'ação ' + 'x'.repeat(hk * 50) + '🐆' + hk;
+        var kk = await crypto.subtle.importKey('raw', chaveT, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        var ref = Array.prototype.map.call(new Uint8Array(await crypto.subtle.sign('HMAC', kk, new TextEncoder().encode(textoT))), function (x) { return (x < 16 ? '0' : '') + x.toString(16); }).join('');
+        if (ON.hmacHex(chaveT, textoT) !== ref) hmacOk = false;
+      }
+      registrar('REG-010: assinatura HMAC-SHA256 igual à do navegador', hmacOk);
+      registrar('REG-010: assinatura não depende da ordem dos campos', ON.canonico({ b: 1, a: [2, { d: 3, c: 'x' }] }) === ON.canonico({ a: [2, { c: 'x', d: 3 }], b: 1 }));
 
       // queda e volta (testamento)
       B._transporte().cair();
@@ -135,7 +156,7 @@
       var A2 = nova(b2, 'ordemA'), B3 = nova(b2, 'ordemB');
       var r2 = await A2.criar('D'); await B3.consultar(r2.codigo); await B3.entrar(1000);
       var B4 = nova(b2, 'ordemB');
-      var retidos = b2.retidos, chaveSala = ON.PREFIXO + r2.codigo + '/sala', chaveEstado = ON.PREFIXO + r2.codigo + '/estado';
+      var retidos = b2.retidos, chaveSala = r2.topico + 'sala', chaveEstado = r2.topico + 'estado';
       var salaSalva = retidos[chaveSala]; delete retidos[chaveSala];           // simula: estado chega primeiro
       var p4 = B4.consultar(r2.codigo);
       await dormir(30); retidos[chaveSala] = salaSalva;
@@ -160,20 +181,20 @@
       registrar('cripto: mensagem chega decifrada nos dois sentidos (com acentos e emoji)', r1.ok && chegouB[0] && chegouB[0].texto === 'Olá, tudo bem? Boa sorte!' && chegouA[0] && chegouA[0].texto === 'Valeu! 😄' && chegouB[0].lado === 'J' && chegouA[0].lado === 'D', { B: chegouB, A: chegouA });
       var pubs = bc.publicacoes.filter(function (p) { return /\/chat$/.test(p.topico); });
       registrar('cripto: no servidor só passa texto embaralhado', pubs.length === 2 && pubs.every(function (p) {
-        var bruto = JSON.stringify(p.msg); return bruto.indexOf('Olá') < 0 && bruto.indexOf('Valeu') < 0 && Object.keys(p.msg).sort().join() === 'ct,id,iv';
+        var bruto = JSON.stringify(p.msg); return bruto.indexOf('Olá') < 0 && bruto.indexOf('Valeu') < 0 && Object.keys(p.msg).sort().join() === 'ct,id,iv,mac';
       }), pubs.map(function (p) { return p.msg; }));
       registrar('cripto: cada mensagem usa um vetor (IV) diferente', pubs[0].msg.iv !== pubs[1].msg.iv);
 
       // espião: sabe o código, assina a sala, tem a própria chave — e mesmo assim não lê
       var espiao = bc.criarTransporte(), capturadas = [];
       await espiao.conectar('espiao', {}); espiao.aoMensagem(function (t, m) { if (/\/chat$/.test(t)) capturadas.push(m); });
-      espiao.assinar(ON.PREFIXO + rc.codigo + '/#');
+      espiao.assinar(rc.topico + '#');
       await CA.enviarChat('segredo do jogo');
       await esperar(function () { return capturadas.length === 1; }, 500);
       var leu = false;
       try {
         var par = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
-        var pubA = bc.retidos[ON.PREFIXO + rc.codigo + '/chave/chatA'].pub;
+        var pubA = bc.retidos[rc.topico + 'chave/chatA'].pub;
         var pa = await crypto.subtle.importKey('raw', ON.deB64(pubA), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
         var bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: pa }, par.privateKey, 256);
         var hk = await crypto.subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
@@ -187,31 +208,57 @@
       var antesRej = CB._diag().chatRejeitadas, antesN = chegouB.length;
       var adult = JSON.parse(JSON.stringify(capturadas[0]));
       var bytes = ON.deB64(adult.ct); bytes[3] ^= 0x01; adult.ct = ON.paraB64(bytes);
-      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', adult, { espiao: true });
+      espiao.publicar(rc.topico + 'chat', adult, { espiao: true });
       await dormir(80);
       registrar('cripto: mensagem adulterada é descartada', CB._diag().chatRejeitadas === antesRej + 1 && chegouB.length === antesN, CB._diag());
 
       // replay: reenviar a mesma mensagem capturada
       antesRej = CB._diag().chatRejeitadas; antesN = chegouB.length;
-      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', capturadas[0], { espiao: true });
+      espiao.publicar(rc.topico + 'chat', capturadas[0], { espiao: true });
       await dormir(80);
       registrar('cripto: mensagem repetida (replay) é descartada', CB._diag().chatRejeitadas === antesRej + 1 && chegouB.length === antesN);
 
       // estranho tentando mandar mensagem (com o próprio id ou fingindo ser o jogador A)
       antesRej = CB._diag().chatRejeitadas; antesN = chegouB.length;
-      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', { id: 'espiao', iv: capturadas[0].iv, ct: capturadas[0].ct }, { espiao: true });
-      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', { id: 'chatA', iv: ON.paraB64(new Uint8Array(12)), ct: ON.paraB64(new Uint8Array(40)) }, { espiao: true });
-      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', { id: 'chatA', iv: 'nao-e-base64!!', ct: 123 }, { espiao: true });
+      espiao.publicar(rc.topico + 'chat', { id: 'espiao', iv: capturadas[0].iv, ct: capturadas[0].ct }, { espiao: true });
+      espiao.publicar(rc.topico + 'chat', { id: 'chatA', iv: ON.paraB64(new Uint8Array(12)), ct: ON.paraB64(new Uint8Array(40)) }, { espiao: true });
+      espiao.publicar(rc.topico + 'chat', { id: 'chatA', iv: 'nao-e-base64!!', ct: 123 }, { espiao: true });
       await dormir(80);
       registrar('segurança: estranho não consegue mandar mensagem (nem fingindo ser o outro)', chegouB.length === antesN);
 
       // chave pública falsa de estranho é ignorada (só vale a do adversário, no tópico dele)
-      espiao.publicar(ON.PREFIXO + rc.codigo + '/chave/espiao', { id: 'espiao', pub: pubA }, { reter: true, espiao: true });
-      espiao.publicar(ON.PREFIXO + rc.codigo + '/chave/chatA', { id: 'outro', pub: pubA }, { reter: false, espiao: true });
+      espiao.publicar(rc.topico + 'chave/espiao', { id: 'espiao', pub: pubA }, { reter: true, espiao: true });
+      espiao.publicar(rc.topico + 'chave/chatA', { id: 'outro', pub: pubA }, { reter: false, espiao: true });
       await dormir(50);
       await CA.enviarChat('ainda funciona');
       await esperar(function () { return chegouB.length === antesN + 1; }, 800);
       registrar('segurança: chave falsa não atrapalha o chat', chegouB[chegouB.length - 1].texto === 'ainda funciona');
+
+      // REG-010: ataque "no meio do caminho": quem escuta o servidor troca as chaves dos DOIS jogadores
+      // (com o id certo de cada um) para ler o chat. Sem o código da sala, a troca é descartada.
+      var chavesAntes = { a: bc.retidos[rc.topico + 'chave/chatA'], b: bc.retidos[rc.topico + 'chave/chatB'] };
+      var parEsp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+      var pubEsp = ON.paraB64(await crypto.subtle.exportKey('raw', parEsp.publicKey));
+      var rejAntes = CB._diag().chatRejeitadas;
+      espiao.publicar(rc.topico + 'chave/chatA', { id: 'chatA', pub: pubEsp }, { reter: true, espiao: true });
+      espiao.publicar(rc.topico + 'chave/chatB', { id: 'chatB', pub: pubEsp, mac: 'f'.repeat(64) }, { reter: true, espiao: true });
+      await dormir(60);
+      antesN = chegouB.length; capturadas.length = 0;
+      await CA.enviarChat('só nós dois');
+      await esperar(function () { return chegouB.length === antesN + 1 && capturadas.length >= 1; }, 800);
+      var leuMitm = false;
+      try {
+        var bitsE = await crypto.subtle.deriveBits({ name: 'ECDH', public: await crypto.subtle.importKey('raw', ON.deB64(chavesAntes.a.pub), { name: 'ECDH', namedCurve: 'P-256' }, false, []) }, parEsp.privateKey, 256);
+        var hkE = await crypto.subtle.importKey('raw', bitsE, 'HKDF', false, ['deriveKey']);
+        var kE = await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode(rc.codigo), info: new TextEncoder().encode('jogo-da-onca/chat/v1|chatA|chatB') }, hkE, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+        await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ON.deB64(capturadas[capturadas.length - 1].iv), additionalData: new TextEncoder().encode(rc.codigo + '|chatA') }, kE, ON.deB64(capturadas[capturadas.length - 1].ct));
+        leuMitm = true;
+      } catch (e) { leuMitm = false; }
+      registrar('REG-010: trocar a chave do adversário pelo servidor não funciona (o chat segue só entre os dois)', chegouB[chegouB.length - 1].texto === 'só nós dois' && !leuMitm && CA.chatPronto && CB.chatPronto, { leuMitm: leuMitm, ultimo: chegouB[chegouB.length - 1] });
+      // o servidor público deixa qualquer um sobrescrever o que está guardado: quem joga republica a própria chave
+      bc.criarTransporte().publicar(rc.topico + 'chave/chatA', chavesAntes.a, { reter: true, espiao: true });
+      bc.criarTransporte().publicar(rc.topico + 'chave/chatB', chavesAntes.b, { reter: true, espiao: true });
+      await dormir(30);
 
       // limites
       registrar('chat: vazio e longo demais são recusados', (await CA.enviarChat('   ')).motivo === 'vazio' && (await CA.enviarChat('x'.repeat(ON.LIMITE_CHAT + 1))).motivo === 'longo');
@@ -229,16 +276,16 @@
 
       // privacidade no servidor
       // só o que o NOSSO jogo publicou (o espião acima publicou lixo de propósito, marcado com opcoes.espiao)
-      var todas = bc.publicacoes.filter(function (p) { return p.topico.indexOf(ON.PREFIXO + rc.codigo + '/') === 0 && !p.opcoes.espiao; });
+      var todas = bc.publicacoes.filter(function (p) { return p.topico.indexOf(rc.topico + '') === 0 && !p.opcoes.espiao; });
       registrar('privacidade: chat nunca fica guardado no servidor', todas.filter(function (p) { return /\/chat$/.test(p.topico); }).every(function (p) { return !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG; }) && !Object.keys(bc.retidos).some(function (t) { return /\/chat$/.test(t); }));
       registrar('privacidade: o que fica guardado tem validade (some sozinho em até 6 h)', todas.filter(function (p) { return p.opcoes.reter && p.msg; }).every(function (p) { return p.opcoes.expiraSeg > 0 && p.opcoes.expiraSeg <= ON.EXPIRA_RETIDO_SEG; }));
-      var camposPermitidos = { v: 1, criador: 1, convidado: 1, status: 1, servidor: 1, t: 1, partida: 1, seq: 1, estado: 1, lance: 1, autor: 1, tipo: 1, id: 1, trocar: 1, aceitar: 1, para: 1, online: 1, pub: 1, iv: 1, ct: 1 };
+      var camposPermitidos = { v: 1, criador: 1, convidado: 1, status: 1, servidor: 1, t: 1, partida: 1, seq: 1, estado: 1, lance: 1, autor: 1, tipo: 1, id: 1, trocar: 1, aceitar: 1, para: 1, online: 1, pub: 1, iv: 1, ct: 1, mac: 1 };
       var estranhos = [];
       todas.forEach(function (p) { if (p.msg) Object.keys(p.msg).forEach(function (c) { if (!camposPermitidos[c]) estranhos.push(c); }); });
       registrar('privacidade: nenhum dado pessoal nas mensagens (só campos do jogo)', estranhos.length === 0, estranhos);
       CA.sair(); CB2.sair();
       await dormir(60);
-      var sobras = Object.keys(bc.retidos).filter(function (t) { return t.indexOf(ON.PREFIXO + rc.codigo + '/') === 0 && !/\/chave\/espiao$/.test(t); });
+      var sobras = Object.keys(bc.retidos).filter(function (t) { return t.indexOf(rc.topico + '') === 0 && !/\/chave\/espiao$/.test(t); });
       registrar('privacidade: quando saem da sala, nada fica guardado no servidor', sobras.length === 0, sobras);
     } catch (e) {
       registrar('exceção: ' + (e && e.stack || e), false);

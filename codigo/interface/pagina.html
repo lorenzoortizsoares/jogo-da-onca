@@ -58,12 +58,15 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           Jogar online
         </button>
         <button type="button" class="btn btn-secundario" id="btnRetomar" hidden>Voltar para a sala online</button>
-        <button type="button" class="btn btn-fantasma" data-abrir="regras">Regras</button>
+        <div class="linha-fantasma">
+          <button type="button" class="btn btn-fantasma" data-abrir="regras">Regras</button>
+          <button type="button" class="btn btn-fantasma" data-abrir="painelSom">Som</button>
+        </div>
       </div>
     </div>
     <div class="band band-espinha" aria-hidden="true"></div>
   </div>
-  <p class="credito">O Jogo da Onça é um jogo tradicional de povos indígenas do Brasil. Grafismos inspirados na arte indígena amazônica (padrões geométricos genéricos).</p>
+  <p class="credito">O Jogo da Onça é um jogo tradicional de povos indígenas do Brasil. Grafismos inspirados na arte indígena amazônica (padrões geométricos genéricos). Som da floresta: “Chaguaramal aves”, de Wilfredor, CC BY-SA 3.0 (Wikimedia Commons).</p>
 </section>
 
 <!-- ================= TELA: ESCOLHA ================= -->
@@ -274,6 +277,27 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       </ul>
       <p class="nota">Toque numa peça sua e depois num ponto destacado. O botão Câmera troca a visão: normal, do lado oposto e de cima.</p>
       <button type="button" class="btn btn-primario" data-fechar>Entendi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SOM (efeitos + volume do som da floresta) ================= -->
+<div class="sobre" id="painelSom" role="dialog" aria-modal="true" aria-labelledby="somTitulo" hidden>
+  <div class="gaveta">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <h2 id="somTitulo">Som</h2>
+      <p class="rotulo">Efeitos do jogo</p>
+      <button type="button" class="btn btn-secundario btn-efeitos" id="btnEfeitos" aria-pressed="true">Efeitos ligados</button>
+      <p class="rotulo"><label for="volFloresta">Som da floresta</label></p>
+      <div class="volume">
+        <button type="button" class="btn btn-secundario btn-vol" id="btnFlorestaMenos" aria-label="Diminuir o som da floresta">−</button>
+        <input type="range" id="volFloresta" min="0" max="100" step="10" value="50">
+        <button type="button" class="btn btn-secundario btn-vol" id="btnFlorestaMais" aria-label="Aumentar o som da floresta">+</button>
+        <output id="volFlorestaTxt" for="volFloresta">50%</output>
+      </div>
+      <p class="nota credito-som">Som da floresta: “Chaguaramal aves”, gravação de Wilfredor (<a href="https://commons.wikimedia.org/wiki/File:Chaguaramal_aves.ogg" target="_blank" rel="noopener">Wikimedia Commons</a>), licença <a href="https://creativecommons.org/licenses/by-sa/3.0/deed.pt-br" target="_blank" rel="noopener">CC BY-SA 3.0</a>.</p>
+      <button type="button" class="btn btn-primario btn-grande btn-ok-som" data-fechar>Pronto</button>
     </div>
   </div>
 </div>

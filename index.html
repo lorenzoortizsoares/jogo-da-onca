@@ -263,6 +263,18 @@ h2 { font-size: 26px; color: var(--palha-hi); margin-bottom: 6px; }
 #btnSom[aria-pressed="false"] .i-on { display: none; }
 #btnSom[aria-pressed="false"] .i-off { display: block; }
 
+/* ---------- painel de som ---------- */
+.linha-fantasma { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-efeitos { width: 100%; }
+.btn-efeitos[aria-pressed="false"] { opacity: .7; text-decoration: line-through; }
+.volume { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px 48px; align-items: center; gap: 8px; }
+.btn-vol { min-height: 52px; padding: 0; font-size: 26px; line-height: 1; }
+.volume input[type="range"] { width: 100%; min-width: 0; height: 44px; accent-color: var(--uru-hi); }
+.volume output { text-align: right; font-weight: 800; color: var(--palha-hi); }
+.credito-som { font-size: 12px; }
+.credito-som a { color: var(--palha-2); }
+.btn-ok-som { width: 100%; margin-top: 14px; }
+
 /* ---------- sobreposições (menu, regras, vitória) ---------- */
 .sobre {
   position: fixed; inset: 0; z-index: 10;
@@ -476,12 +488,15 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           Jogar online
         </button>
         <button type="button" class="btn btn-secundario" id="btnRetomar" hidden>Voltar para a sala online</button>
-        <button type="button" class="btn btn-fantasma" data-abrir="regras">Regras</button>
+        <div class="linha-fantasma">
+          <button type="button" class="btn btn-fantasma" data-abrir="regras">Regras</button>
+          <button type="button" class="btn btn-fantasma" data-abrir="painelSom">Som</button>
+        </div>
       </div>
     </div>
     <div class="band band-espinha" aria-hidden="true"></div>
   </div>
-  <p class="credito">O Jogo da Onça é um jogo tradicional de povos indígenas do Brasil. Grafismos inspirados na arte indígena amazônica (padrões geométricos genéricos).</p>
+  <p class="credito">O Jogo da Onça é um jogo tradicional de povos indígenas do Brasil. Grafismos inspirados na arte indígena amazônica (padrões geométricos genéricos). Som da floresta: “Chaguaramal aves”, de Wilfredor, CC BY-SA 3.0 (Wikimedia Commons).</p>
 </section>
 
 <!-- ================= TELA: ESCOLHA ================= -->
@@ -692,6 +707,27 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       </ul>
       <p class="nota">Toque numa peça sua e depois num ponto destacado. O botão Câmera troca a visão: normal, do lado oposto e de cima.</p>
       <button type="button" class="btn btn-primario" data-fechar>Entendi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SOM (efeitos + volume do som da floresta) ================= -->
+<div class="sobre" id="painelSom" role="dialog" aria-modal="true" aria-labelledby="somTitulo" hidden>
+  <div class="gaveta">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <h2 id="somTitulo">Som</h2>
+      <p class="rotulo">Efeitos do jogo</p>
+      <button type="button" class="btn btn-secundario btn-efeitos" id="btnEfeitos" aria-pressed="true">Efeitos ligados</button>
+      <p class="rotulo"><label for="volFloresta">Som da floresta</label></p>
+      <div class="volume">
+        <button type="button" class="btn btn-secundario btn-vol" id="btnFlorestaMenos" aria-label="Diminuir o som da floresta">−</button>
+        <input type="range" id="volFloresta" min="0" max="100" step="10" value="50">
+        <button type="button" class="btn btn-secundario btn-vol" id="btnFlorestaMais" aria-label="Aumentar o som da floresta">+</button>
+        <output id="volFlorestaTxt" for="volFloresta">50%</output>
+      </div>
+      <p class="nota credito-som">Som da floresta: “Chaguaramal aves”, gravação de Wilfredor (<a href="https://commons.wikimedia.org/wiki/File:Chaguaramal_aves.ogg" target="_blank" rel="noopener">Wikimedia Commons</a>), licença <a href="https://creativecommons.org/licenses/by-sa/3.0/deed.pt-br" target="_blank" rel="noopener">CC BY-SA 3.0</a>.</p>
+      <button type="button" class="btn btn-primario btn-grande btn-ok-som" data-fechar>Pronto</button>
     </div>
   </div>
 </div>
@@ -3521,7 +3557,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
    Sem conta: as mensagens passam por um servidor MQTT público gratuito
    (com um segundo servidor de reserva). Só os lances trafegam.
 
-   Tópicos (PREFIXO + CÓDIGO + '/...'):
+   Tópicos (PREFIXO + RESUMO-DO-CÓDIGO + '/...'; toda mensagem leva "mac", a assinatura HMAC):
      sala      (retido)  { v, criador:{id,lado}, convidado:{id}|null, status, servidor }
      estado    (retido)  { partida, seq, estado, lance, autor }
      pedido              { tipo:'entrar'|'cheia'|'revanche'|'revanche-resposta'|'sair', id, ... }
@@ -3531,7 +3567,13 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
 (function (root) {
   'use strict';
 
-  var PREFIXO = 'jogodaonca-lz/v1/';
+  // v2 (REG-010): o código da sala NÃO aparece mais no servidor. O tópico é um resumo do código
+  // (PBKDF2) e toda mensagem leva uma assinatura (HMAC) com chave tirada do código, que só os dois
+  // jogadores conhecem. Antes, quem escutasse o servidor inteiro via o código e podia trocar a chave
+  // do chat (lendo as mensagens) ou injetar um tabuleiro falso.
+  var PREFIXO = 'jogodaonca-lz/v2/';
+  var ITERACOES_SALA = 100000;
+  var SAL_SALA = 'jogo-da-onca/sala/v2';
   var ALFABETO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // sem 0/O, 1/I/L (evita confusão ao digitar)
   var SERVIDORES = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
   var MQTT_JS = 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';
@@ -3578,6 +3620,81 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
   function formatarCodigo(c) { return c ? c.slice(0, 3) + '-' + c.slice(3) : ''; }
   function oposto(lado) { return lado === 'J' ? 'D' : 'J'; }
   function copia(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+
+  // ------------------------------------------------------------------ assinatura das mensagens (HMAC-SHA256)
+  // Síncrono de propósito (JavaScript puro): assim a ordem das mensagens nunca embaralha.
+  var K256 = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+  function ror(x, n) { return (x >>> n) | (x << (32 - n)); }
+  function sha256(bytes) {
+    var l = bytes.length, nb = ((l + 9 + 63) >> 6) << 6, m = new Uint8Array(nb), i;
+    m.set(bytes); m[l] = 0x80;
+    var bits = l * 8, alto = Math.floor(bits / 4294967296);
+    m[nb - 8] = alto >>> 24; m[nb - 7] = (alto >>> 16) & 255; m[nb - 6] = (alto >>> 8) & 255; m[nb - 5] = alto & 255;
+    m[nb - 4] = bits >>> 24; m[nb - 3] = (bits >>> 16) & 255; m[nb - 2] = (bits >>> 8) & 255; m[nb - 1] = bits & 255;
+    var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    var w = new Array(64);
+    for (var off = 0; off < nb; off += 64) {
+      for (i = 0; i < 16; i++) w[i] = (m[off + 4 * i] << 24) | (m[off + 4 * i + 1] << 16) | (m[off + 4 * i + 2] << 8) | m[off + 4 * i + 3];
+      for (i = 16; i < 64; i++) {
+        var s0 = ror(w[i - 15], 7) ^ ror(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+        var s1 = ror(w[i - 2], 17) ^ ror(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (i = 0; i < 64; i++) {
+        var t1 = (h + (ror(e, 6) ^ ror(e, 11) ^ ror(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w[i]) | 0;
+        var t2 = ((ror(a, 2) ^ ror(a, 13) ^ ror(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    var out = new Uint8Array(32);
+    for (i = 0; i < 8; i++) { out[4 * i] = H[i] >>> 24; out[4 * i + 1] = (H[i] >>> 16) & 255; out[4 * i + 2] = (H[i] >>> 8) & 255; out[4 * i + 3] = H[i] & 255; }
+    return out;
+  }
+  function hex(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16); return s; }
+  function hmacHex(chave, texto) {
+    var k = new Uint8Array(64), msg = utf8(texto), i;
+    k.set(chave.length > 64 ? sha256(chave) : chave);
+    var dentro = new Uint8Array(64 + msg.length), fora = new Uint8Array(96);
+    for (i = 0; i < 64; i++) { dentro[i] = k[i] ^ 0x36; fora[i] = k[i] ^ 0x5c; }
+    dentro.set(msg, 64);
+    fora.set(sha256(dentro), 64);
+    return hex(sha256(fora));
+  }
+  // JSON com as chaves em ordem: o mesmo objeto vira sempre o mesmo texto (para assinar e conferir)
+  function canonico(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+    if (Array.isArray(v)) return '[' + v.map(canonico).join(',') + ']';
+    return '{' + Object.keys(v).filter(function (k) { return v[k] !== undefined; }).sort().map(function (k) { return JSON.stringify(k) + ':' + canonico(v[k]); }).join(',') + '}';
+  }
+  function assinatura(chave, sufixo, dados) { return hmacHex(chave, sufixo + '\n' + canonico(dados)); }
+  function iguais(a, b) {   // comparação sem atalho (tempo constante)
+    if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+    var r = 0; for (var i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return r === 0;
+  }
+  // código da sala -> { topico (resumo, o servidor nunca vê o código), chaveMac (assina as mensagens) }
+  function derivarSala(codigo, iteracoes) {
+    if (!criptoDisponivel()) return Promise.reject(new Error('navegador sem criptografia'));
+    var subtle = root.crypto.subtle;
+    return subtle.importKey('raw', utf8(codigo), 'PBKDF2', false, ['deriveBits'])
+      .then(function (k) { return subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: utf8(SAL_SALA), iterations: iteracoes || ITERACOES_SALA }, k, 384); })
+      .then(function (bits) {
+        var b = new Uint8Array(bits);
+        return { topico: PREFIXO + hex(b.slice(0, 16)) + '/', chaveMac: b.slice(16, 48) };
+      });
+  }
 
   // ------------------------------------------------------------------ biblioteca MQTT (carregada só quando precisa)
   var carregando = null;
@@ -3668,6 +3785,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           nome: 'memoria',
           conectar: function (id, opcoes) { c.will = opcoes && opcoes.will; c.ligado = true; depois(function () { c.aoEst(true); }); return Promise.resolve(); },
           publicar: function (t, obj, o) {
+            if (c.caido) return;   // como no servidor real: quem caiu não publica nada
             var msg = copia(obj);
             publicacoes.push({ topico: t, msg: copia(msg), opcoes: copia(o || {}) });
             if (o && o.reter) { if (msg == null) delete retidos[t]; else retidos[t] = msg; }
@@ -3678,8 +3796,8 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           aoConexao: function (cb) { c.aoEst = cb; },
           desconectar: function () { c.ligado = false; },
           // só para testes: queda de conexão (dispara o testamento) e volta
-          cair: function () { if (!c.ligado) return; c.ligado = false; if (c.will) entregar(c.will.topico, c.will.dados); c.aoEst(false); },
-          voltar: function () { c.ligado = true; c.aoEst(true); c.filtros.forEach(function (f) { entregarRetidos(c, f); }); }
+          cair: function () { if (!c.ligado) return; c.ligado = false; c.caido = true; if (c.will) entregar(c.will.topico, c.will.dados); c.aoEst(false); },
+          voltar: function () { c.ligado = true; c.caido = false; c.aoEst(true); c.filtros.forEach(function (f) { entregarRetidos(c, f); }); }
         };
         return tr;
       }
@@ -3690,7 +3808,8 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
   // opcoes: { id, criarTransporte(indiceServidor) -> transporte, initialState() -> estado inicial,
   //           batidaMs (8000), ausenciaMs (20000), esperaSalaMs (4500) }
   function criarSala(opcoes) {
-    var o = Object.assign({ batidaMs: 8000, ausenciaMs: 20000, esperaSalaMs: 4500 }, opcoes || {});
+    // iteracoesSala: só os testes simulados usam menos (o "tempo virtual" do Chrome de teste não espera o PBKDF2)
+    var o = Object.assign({ batidaMs: 8000, ausenciaMs: 20000, esperaSalaMs: 4500, iteracoesSala: ITERACOES_SALA }, opcoes || {});
     var eventos = {};
     var s = {
       id: o.id || gerarId(), codigo: null, servidor: 0, transporte: null,
@@ -3701,11 +3820,24 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       chatRejeitadas: 0, filaChat: Promise.resolve(), geracaoChave: 0
     };
     function emitir(nome, dado) { (eventos[nome] || []).slice().forEach(function (cb) { cb(dado); }); }
-    function base() { return PREFIXO + s.codigo + '/'; }
+    function base() { return s.topico || ''; }
     function agora() { return Date.now(); }
+    // calcula o tópico e a chave de assinatura a partir do código (o servidor nunca vê o código)
+    function prepararSala() {
+      var codigo = s.codigo;
+      return derivarSala(codigo, o.iteracoesSala).then(function (d) {
+        if (s.codigo === codigo) { s.topico = d.topico; s.chaveMac = d.chaveMac; }
+      });
+    }
+    function assinar(sufixo, dados) {
+      if (dados == null) return dados;
+      var limpo = Object.assign({}, dados); delete limpo.mac;
+      limpo.mac = assinatura(s.chaveMac, sufixo, limpo);
+      return limpo;
+    }
     // retidos (sala, estado, chaves) expiram sozinhos; o resto é só "de passagem"
     function publicar(sufixo, dados, reter) {
-      if (s.transporte) s.transporte.publicar(base() + sufixo, dados, { reter: !!reter, expiraSeg: reter ? EXPIRA_RETIDO_SEG : EXPIRA_MSG_SEG });
+      if (s.transporte && s.chaveMac) s.transporte.publicar(base() + sufixo, assinar(sufixo, dados), { reter: !!reter, expiraSeg: reter ? EXPIRA_RETIDO_SEG : EXPIRA_MSG_SEG });
     }
 
     // ---- chaves do chat: cada aparelho gera um par só seu; a chave secreta nunca passa pelo servidor
@@ -3779,8 +3911,20 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
     function ehJogador(id) { return !!s.info && ((s.info.criador && s.info.criador.id === id) || (s.info.convidado && s.info.convidado.id === id)); }
 
     function receber(topico, msg) {
-      if (s.encerrada || !msg || topico.indexOf(base()) !== 0) return;
+      if (s.encerrada || !msg || typeof msg !== 'object' || !s.topico || topico.indexOf(base()) !== 0) return;
       var resto = topico.slice(base().length);
+      // REG-010: sem a assinatura certa (de quem sabe o código), a mensagem é descartada
+      var dados = Object.assign({}, msg); delete dados.mac;
+      if (!s.chaveMac || !iguais(msg.mac, assinatura(s.chaveMac, resto, dados))) {
+        s.rejeitadas = (s.rejeitadas || 0) + 1;
+        if (resto === 'chat') s.chatRejeitadas++;
+        return;
+      }
+      tratar(resto, dados);
+    }
+    // mensagem já conferida (assinatura ok)
+    function tratar(resto, msg) {
+      if (s.encerrada) return;
       if (resto === 'sala') {
         var advAntes = idAdversario();
         s.info = msg;
@@ -3793,7 +3937,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         }
         emitir('sala', msg);
         // o estado pode ter chegado antes da sala: processa agora
-        if (s.estadoPendente) { var p = s.estadoPendente; s.estadoPendente = null; receber(base() + 'estado', p); }
+        if (s.estadoPendente) { var p = s.estadoPendente; s.estadoPendente = null; tratar('estado', p); }
         return;
       }
       if (resto === 'estado') {
@@ -3812,7 +3956,11 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         if (typeof msg.id !== 'string' || typeof msg.pub !== 'string' || msg.pub.length > 200 || msg.id === s.id || resto !== 'chave/' + msg.id) return;
         s.chavesRecebidas = s.chavesRecebidas || {};
         s.chavesRecebidas[msg.id] = msg.pub;
-        if (msg.id === idAdversario() && msg.pub !== s.pubAdv) { s.pubAdv = msg.pub; s.chaveChat = null; derivar(); }
+        if (msg.id === idAdversario() && msg.pub !== s.pubAdv) {
+          s.pubAdv = msg.pub; s.chaveChat = null; derivar();
+          // o adversário trocou de chave (recarregou): republico a minha, caso a guardada tenha sido apagada/sobrescrita
+          if (s.minhaPub) publicar('chave/' + s.id, { id: s.id, pub: s.minhaPub }, true);
+        }
         return;
       }
       if (resto === 'chat') {
@@ -3880,7 +4028,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         emitir('conexao', ok);
         if (ok) iniciarBatidas();
       });
-      return s.transporte.conectar(s.id, { will: { topico: base() + 'presenca/' + s.id, dados: { id: s.id, online: false } } })
+      return s.transporte.conectar(s.id, { will: { topico: base() + 'presenca/' + s.id, dados: assinar('presenca/' + s.id, { id: s.id, online: false }) } })
         .then(function () { s.transporte.assinar(base() + '#'); });
     }
     // tenta o servidor principal e, se falhar, o de reserva
@@ -3907,6 +4055,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
     var api = {
       get id() { return s.id; },
       get codigo() { return s.codigo; },
+      get topico() { return s.topico; },     // resumo do código (é o que o servidor vê)
       get servidor() { return s.servidor; },
       get info() { return s.info; },
       get estado() { return s.estado; },
@@ -3939,12 +4088,12 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       // cria uma sala nova; quem cria escolhe o lado
       criar: function (lado, codigo) {
         s.codigo = codigo || gerarCodigo();
-        return ligarAlgum([0, 1]).then(function () {
+        return prepararSala().then(function () { return ligarAlgum([0, 1]); }).then(function () {
           s.info = { v: 1, criador: { id: s.id, lado: lado === 'J' ? 'J' : 'D' }, convidado: null, status: 'aguardando', servidor: s.servidor, t: agora() };
           publicar('sala', s.info, true);
           publicar('estado', null, true);   // limpa partida antiga com o mesmo código (improvável)
           prepararChave();
-          return { codigo: s.codigo };
+          return { codigo: s.codigo, topico: s.topico };
         });
       },
       // procura uma sala pelo código (no principal e depois no de reserva)
@@ -3968,7 +4117,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
               };
             });
         };
-        return proximo();
+        return prepararSala().then(proximo);
       },
       // depois de consultar: o convidado aceita e entra
       entrar: function (tempoMs) {
@@ -4028,6 +4177,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         pararBatidas();
         // apaga os segredos do chat da memória
         s.par = null; s.chaveChat = null; s.minhaPub = null; s.pubAdv = null; s.chavesRecebidas = null;
+        if (s.chaveMac) s.chaveMac.fill(0);
         var tr = s.transporte; s.transporte = null;
         if (tr) setTimeout(function () { tr.desconectar(); }, 150);
       },
@@ -4043,6 +4193,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
     gerarCodigo: gerarCodigo, gerarId: gerarId, normalizarCodigo: normalizarCodigo, codigoValido: codigoValido,
     formatarCodigo: formatarCodigo, oposto: oposto, casaTopico: casaTopico, limparTexto: limparTexto,
     criptoDisponivel: criptoDisponivel, paraB64: paraB64, deB64: deB64,
+    derivarSala: derivarSala, hmacHex: hmacHex, assinatura: assinatura, canonico: canonico,
     criarTransporteMqtt: criarTransporteMqtt, criarBrokerMemoria: criarBrokerMemoria, criarSala: criarSala,
     carregarMqtt: carregarMqtt
   };
@@ -4532,7 +4683,7 @@ function novaPartida(estado) {
   pedido++;
   S = estado || L.initialState();
   hist = []; chaves = [L.positionKey(S)];
-  sel = -1; cadeia = false; fim = null; ocupado = false; hover = -1;
+  sel = -1; cadeia = false; fim = null; ocupado = false; hover = -1; lanceTurno = null;
   $('vitoria').hidden = true;
   caes.forEach((d) => { d.userData.point = -1; });
   sincronizar(); desenharMarcadores(); atualizarHud();
@@ -4633,7 +4784,7 @@ function trocarVista() {
   toast(NOME_VISTA[vistaAtual]);
 }
 function abrir(id) { $(id).hidden = false; const b = $(id).querySelector('button'); if (b) b.focus(); }
-function fecharSobreposicoes() { ['menu', 'regras', 'chat'].forEach((id) => { $(id).hidden = true; }); }
+function fecharSobreposicoes() { ['menu', 'regras', 'chat', 'painelSom'].forEach((id) => { $(id).hidden = true; }); }
 function irParaInicio() {
   pedido++; ocupado = false; fecharSobreposicoes(); fecharAviso(); $('vitoria').hidden = true;
   if (sala) { sala.sair(); sala = null; esquecerSessao(); }
@@ -4707,7 +4858,8 @@ function novaSessao() {
 
 // chegou um estado da partida (meu eco, lance do adversário, nova partida ou reconexão)
 async function aoEstadoOnline({ msg }) {
-  if (cfg.mode !== 'online' || !sala || !sala.meuLado || !msg || !msg.estado) return;
+  if (cfg.mode !== 'online' || !sala || !sala.meuLado || !msg || !estadoValido(msg.estado)) return;   // REG-011
+  if (!Number.isInteger(msg.partida) || !Number.isInteger(msg.seq)) return;
   if (msg.partida !== partidaOnline) {                  // primeira partida, revanche ou volta à sala
     partidaOnline = msg.partida; seqOnline = msg.seq;
     fecharAviso(); $('vitoria').hidden = true;
@@ -4722,6 +4874,7 @@ async function aoEstadoOnline({ msg }) {
   seqOnline = msg.seq;
   if (!esperado) {                                      // fora de ordem: sincroniza direto
     pedido++; S = L.cloneState(msg.estado); ocupado = false; cadeia = false; sel = -1;
+    lanceTurno = null;                                  // nunca reenviar um lance meu que ficou pela metade
     sincronizar(); fimDoTurno();
     return;
   }
@@ -4730,6 +4883,16 @@ async function aoEstadoOnline({ msg }) {
   if (!(await executarLance(msg.lance, meu))) return;
   ocupado = false;
   fimDoTurno();
+}
+// REG-011: um estado vindo da rede precisa ser um tabuleiro possível (senão o jogo quebraria ao desenhar)
+function estadoValido(e) {
+  if (!e || typeof e !== 'object' || !Array.isArray(e.board) || e.board.length !== L.N) return false;
+  if (e.turn !== 'J' && e.turn !== 'D') return false;
+  if (!Number.isInteger(e.captured) || e.captured < 0 || e.captured > 14) return false;
+  if (!Number.isInteger(e.jaguar) || e.jaguar < 0 || e.jaguar >= L.N || e.board[e.jaguar] !== 2) return false;
+  let caes = 0, oncas = 0;
+  for (const v of e.board) { if (v === 1) caes++; else if (v === 2) oncas++; else if (v !== 0) return false; }
+  return oncas === 1 && caes === 14 - e.captured;
 }
 function lanceConfere(estado, lance, alvo) {
   try { const r = L.applyMove(estado, lance); return L.positionKey(r) === L.positionKey(alvo) && r.captured === alvo.captured; } catch (e) { return false; }
@@ -4872,41 +5035,84 @@ $('btnTrocar').onclick = () => {
 $('btnDesfazer').onclick = desfazer;
 $('btnParar').onclick = encerrarCadeia;
 $('btnCamera').onclick = trocarVista;
-// ---- som ambiente de floresta (gravação real escolhida pelo usuário em assets/sons/ambiente.mp3)
-// Toca em laço, bem baixinho, em todas as telas; segue o botão Som; pausa com a aba escondida.
-const AMBIENTE_VOLUME = 0.22;
+// ---- som ambiente de floresta: "Chaguaramal aves" (Wilfredor, CC BY-SA 3.0), em assets/sons/ambiente.mp3
+// Toca em laço em todas as telas, com volume próprio (painel Som: − / +); pausa com a aba escondida.
+// O volume é independente dos efeitos (toc, latidos, rugido), que têm o seu liga/desliga.
+const AMBIENTE_MAX = 0.44;                 // volume no 100% (50% = 0,22, o "bem baixinho" combinado)
 const ambiente = new Audio();
-ambiente.loop = true; ambiente.preload = 'none'; ambiente.volume = 0;
+ambiente.loop = true; ambiente.preload = 'none';
 ambiente.src = 'assets/sons/ambiente.mp3';
-let ambienteLiberado = false, timerFade = 0;
-ambiente.addEventListener('error', () => { ambienteLiberado = false; });   // sem arquivo: o jogo segue sem ambiente
+let nivelFloresta = guardar.ler('floresta', 50);
+if (typeof nivelFloresta !== 'number' || !(nivelFloresta >= 0 && nivelFloresta <= 100)) nivelFloresta = 50;
+nivelFloresta = Math.round(nivelFloresta / 10) * 10;
+let ambienteLiberado = false, ambienteFalhou = false, timerFade = 0, ganhoAtual = 0;
+// No iPhone o volume de um <audio> não muda por código; com Web Audio (ganho) muda em todo lugar.
+// Aberto direto do PC (file://) o Web Audio fica mudo com arquivo local, então lá usa o volume comum.
+let ctxAmb = null, ganhoAmb = null;
+function prepararGanho() {
+  if (ctxAmb || !/^https?:$/.test(location.protocol)) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctxAmb = new AC();
+    ganhoAmb = ctxAmb.createGain(); ganhoAmb.gain.value = 0;
+    ctxAmb.createMediaElementSource(ambiente).connect(ganhoAmb).connect(ctxAmb.destination);
+  } catch (e) { ctxAmb = null; ganhoAmb = null; }
+}
+function aplicarGanho(v) {
+  ganhoAtual = v;
+  if (ganhoAmb) { ganhoAmb.gain.value = v; ambiente.volume = 1; } else ambiente.volume = Math.max(0, Math.min(1, v));
+}
+const alvoAmbiente = () => AMBIENTE_MAX * nivelFloresta / 100;
+ambiente.addEventListener('error', () => { ambienteFalhou = true; });   // sem arquivo: o jogo segue sem ambiente
 function atualizarAmbiente() {
-  const tocar = ambienteLiberado && !!audio && !audio.isMuted() && !document.hidden;
+  const tocar = ambienteLiberado && !ambienteFalhou && nivelFloresta > 0 && !document.hidden;
   clearInterval(timerFade);
   if (tocar) {
-    if (ambiente.paused) { const p = ambiente.play(); if (p && p.catch) p.catch(() => {}); }
-    timerFade = setInterval(() => {                         // entra devagar (~2 s)
-      ambiente.volume = Math.min(AMBIENTE_VOLUME, ambiente.volume + AMBIENTE_VOLUME / 20);
-      if (ambiente.volume >= AMBIENTE_VOLUME) clearInterval(timerFade);
-    }, 100);
+    if (ctxAmb && ctxAmb.state === 'suspended') ctxAmb.resume().catch(() => {});
+    if (ambiente.paused) { aplicarGanho(0); const p = ambiente.play(); if (p && p.catch) p.catch(() => {}); }
+    const alvo = alvoAmbiente(), passo = AMBIENTE_MAX / 20;
+    timerFade = setInterval(() => {                         // entra (ou muda de volume) devagar
+      const v = ganhoAtual < alvo ? Math.min(alvo, ganhoAtual + passo) : Math.max(alvo, ganhoAtual - passo);
+      aplicarGanho(v);
+      if (v === alvo) clearInterval(timerFade);
+    }, 60);
   } else {
-    ambiente.volume = 0;
+    aplicarGanho(0);
     if (!ambiente.paused) ambiente.pause();
   }
 }
 // navegadores só deixam tocar som depois do primeiro toque do usuário
-const liberarAmbiente = () => { if (!ambienteLiberado && !SELFTEST) { ambienteLiberado = true; atualizarAmbiente(); } };
+const liberarAmbiente = () => { if (!ambienteLiberado && !SELFTEST) { ambienteLiberado = true; prepararGanho(); atualizarAmbiente(); } };
 document.addEventListener('pointerdown', liberarAmbiente, { capture: true });
 document.addEventListener('keydown', liberarAmbiente, { capture: true });
 document.addEventListener('visibilitychange', atualizarAmbiente);
 
-function atualizarBotaoSom() {
-  const mudo = audio ? audio.isMuted() : true;
-  $('btnSom').setAttribute('aria-pressed', String(!mudo));
-  $('btnSom').querySelector('span').textContent = mudo ? 'Sem som' : 'Som';
+function mudarFloresta(n) {
+  nivelFloresta = Math.max(0, Math.min(100, Math.round(n / 10) * 10));
+  guardar.gravar('floresta', nivelFloresta);
+  atualizarPainelSom(); atualizarAmbiente();
 }
-$('btnSom').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarBotaoSom(); atualizarAmbiente(); if (!audio.isMuted()) som('toc', 0.8); };
-atualizarBotaoSom();
+function atualizarPainelSom() {
+  const mudo = audio ? audio.isMuted() : true;
+  $('btnEfeitos').setAttribute('aria-pressed', String(!mudo));
+  $('btnEfeitos').textContent = mudo ? 'Efeitos desligados' : 'Efeitos ligados';
+  $('btnEfeitos').disabled = !audio;
+  $('volFloresta').value = String(nivelFloresta);
+  $('volFlorestaTxt').textContent = nivelFloresta ? nivelFloresta + '%' : 'Sem';
+  $('btnFlorestaMenos').disabled = nivelFloresta <= 0;
+  $('btnFlorestaMais').disabled = nivelFloresta >= 100;
+  // ícone da barra: "Sem som" só quando os efeitos E a floresta estão desligados
+  const tudoMudo = mudo && nivelFloresta === 0;
+  $('btnSom').setAttribute('aria-pressed', String(!tudoMudo));
+  $('btnSom').querySelector('span').textContent = tudoMudo ? 'Sem som' : 'Som';
+}
+$('btnSom').onclick = () => { som('unlock'); atualizarPainelSom(); abrir('painelSom'); };
+$('btnEfeitos').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarPainelSom(); if (!audio.isMuted()) som('toc', 0.8); };
+$('btnFlorestaMenos').onclick = () => mudarFloresta(nivelFloresta - 10);
+$('btnFlorestaMais').onclick = () => mudarFloresta(nivelFloresta + 10);
+$('volFloresta').addEventListener('input', () => mudarFloresta(Number($('volFloresta').value)));
+atualizarPainelSom();
 
 // ---------------------------------------------------------------- ganchos de teste
 function posTela(i) {
@@ -4964,6 +5170,7 @@ if (SELFTEST) {
   if (qs.get('demo') === 'win') terminar('J');
   if (qs.get('tela') === 'menu') abrir('menu');
   if (qs.get('tela') === 'regras') abrir('regras');
+  if (qs.get('tela') === 'som') abrir('painelSom');
 } else if (qs.has('sala')) {
   // convite: ?sala=CÓDIGO (abre direto a confirmação; se este aparelho já está na sala, volta para a partida)
   irParaOnline('entrar');
@@ -5016,6 +5223,39 @@ async function autoteste() {
     for (let k = 0; k < 3; k++) { $('btnCamera').click(); await dormir(900); vistas.push([vistaAtual, Math.round(anguloAtual().el)]); }
     check('câmera: botão alterna normal → lado oposto → de cima → normal', JSON.stringify(vistas) === JSON.stringify([['oposta', 35], ['cima', 90], ['normal', 35]]), vistas);
     check('câmera: aviso com o nome da visão', !$('toast').hidden && $('toast').textContent === 'Visão normal', $('toast').textContent);
+
+    // painel Som: efeitos liga/desliga e volume do som da floresta com − e + (pedido do usuário)
+    const florestaAntes = nivelFloresta, mudoAntes = audio ? audio.isMuted() : true;
+    mudarFloresta(50);
+    $('btnSom').click(); await dormir(30);
+    check('som: botão Som abre o painel', !$('painelSom').hidden);
+    check('REG-002 layout: painel de som cabe na tela', vazamentos().length === 0 && (() => { const r = $('painelSom').querySelector('.gaveta').getBoundingClientRect(); return r.left >= -1 && r.right <= document.documentElement.clientWidth + 1; })(), vazamentos());
+    $('btnFlorestaMenos').click(); $('btnFlorestaMenos').click();
+    check('som: "−" diminui o som da floresta (50% → 30%) e guarda no aparelho', nivelFloresta === 30 && $('volFloresta').value === '30' && $('volFlorestaTxt').textContent === '30%' && guardar.ler('floresta', null) === 30 && Math.abs(alvoAmbiente() - AMBIENTE_MAX * 0.3) < 1e-9,
+      { nivel: nivelFloresta, txt: $('volFlorestaTxt').textContent });
+    $('btnFlorestaMais').click();
+    check('som: "+" aumenta o som da floresta (30% → 40%)', nivelFloresta === 40);
+    for (let k = 0; k < 6; k++) $('btnFlorestaMenos').click();
+    check('som: no 0 a floresta desliga e o "−" fica travado', nivelFloresta === 0 && $('volFlorestaTxt').textContent === 'Sem' && $('btnFlorestaMenos').disabled && ambiente.paused && ganhoAtual === 0);
+    $('volFloresta').value = '100'; $('volFloresta').dispatchEvent(new Event('input'));
+    check('som: o controle deslizante também muda o volume (100%, "+" travado)', nivelFloresta === 100 && $('btnFlorestaMais').disabled && $('volFlorestaTxt').textContent === '100%');
+    if (audio) {
+      audio.setMuted(false); atualizarPainelSom();
+      $('btnEfeitos').click();
+      check('som: botão de efeitos desliga só os efeitos (a floresta continua)', audio.isMuted() && $('btnEfeitos').getAttribute('aria-pressed') === 'false' && nivelFloresta === 100 && $('btnSom').getAttribute('aria-pressed') === 'true');
+      mudarFloresta(0);
+      check('som: barra mostra "Sem som" só com efeitos e floresta desligados', $('btnSom').getAttribute('aria-pressed') === 'false' && $('btnSom').textContent.trim() === 'Sem som');
+      $('btnEfeitos').click();
+      check('som: efeitos voltam a ligar', !audio.isMuted() && $('btnSom').getAttribute('aria-pressed') === 'true');
+      audio.setMuted(mudoAntes);
+    }
+    const credito = $('painelSom').querySelector('.credito-som');
+    check('som: crédito da gravação (licença CC BY-SA 3.0) no painel e na tela inicial',
+      /Wilfredor/.test(credito.textContent) && /CC BY-SA 3\.0/.test(credito.textContent) && credito.querySelector('a[href*="creativecommons.org/licenses/by-sa/3.0"]') && credito.querySelector('a[href*="Chaguaramal_aves"]') &&
+      /Wilfredor.*CC BY-SA 3\.0/.test(document.querySelector('#telaInicio .credito').textContent));
+    $('painelSom').querySelector('[data-fechar]').click(); await dormir(30);
+    check('som: "Pronto" fecha o painel', $('painelSom').hidden);
+    mudarFloresta(florestaAntes);
 
     // onça anda 12 -> 17
     clicarPonto(12); clicarPonto(17); await ocioso();
@@ -5090,8 +5330,8 @@ async function autoteste() {
     // ONLINE (servidor simulado em memória + adversário robô; o caminho da tela é o real)
     const broker = ON.criarBrokerMemoria();
     fabricaTransporte = () => broker.criarTransporte();
-    opcoesSala = { batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300 };
-    const robo = (id) => ON.criarSala({ id, criarTransporte: () => broker.criarTransporte(), initialState: () => L.initialState(), batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300 });
+    opcoesSala = { batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 };   // REG-012
+    const robo = (id) => ON.criarSala({ id, criarTransporte: () => broker.criarTransporte(), initialState: () => L.initialState(), batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 });
     irParaInicio();
     $('btnModoOnline').click(); $('btnCriarSala').click();
     document.querySelector('[data-lado-online="J"]').click();
@@ -5126,7 +5366,7 @@ async function autoteste() {
     const noServidor = broker.publicacoes.filter((p) => p.topico.endsWith('/chat'));
     check('cripto: no servidor só passa texto embaralhado (sem o texto, sem nomes)', noServidor.length >= 1 && noServidor.every((p) => {
       const bruto = JSON.stringify(p.msg);
-      return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
+      return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv,mac' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
     }), noServidor.map((p) => p.msg));
     await conv.enviarChat('<img src=x onerror="window.__xss=1"><b>oi</b>');
     await esperar(() => historicoChat.length === 2, 3000);
@@ -5158,18 +5398,23 @@ async function autoteste() {
     intruso.fechar();
     // mensagem falsa de estranho é ignorada
     const antes = L.positionKey(S);
-    broker.criarTransporte().publicar(ON.PREFIXO + codigo + '/estado', { partida: 1, seq: 99, estado: L.initialState(), lance: null, autor: 'robo-intruso' }, { reter: false });
+    broker.criarTransporte().publicar(conv.topico + 'estado', { partida: 1, seq: 99, estado: L.initialState(), lance: null, autor: 'robo-intruso' }, { reter: false });
     await dormir(80);
     check('online: estado falso de estranho é ignorado', L.positionKey(S) === antes && seqOnline === 2);
-    // captura em cadeia vai inteira para o adversário
+    // REG-011: o adversário (com assinatura válida) manda um tabuleiro impossível: é ignorado e nada quebra
+    const errosAntes = window.__errors.length;
+    conv.jogar({ type: 'dog', from: 16, to: 11 }, Object.assign({}, L.initialState(), { board: [1, 2, 3], jaguar: 1 }));
+    await dormir(120);
+    check('REG-011 tabuleiro impossível vindo da rede é ignorado (sem travar)', L.positionKey(S) === antes && seqOnline === 2 && !ocupado && window.__errors.length === errosAntes, { seq: seqOnline, erros: window.__errors.slice(errosAntes) });
+    // captura em cadeia vai inteira para o adversário (o seq 3 acima foi descartado: agora é o 4)
     const b3 = new Array(L.N).fill(0);
     [17, 7, 0, 1, 3, 4, 5, 6, 8, 9, 10, 11, 13, 14].forEach((i) => { b3[i] = 1; });
     b3[22] = 2;
     const posC = Object.assign({}, L.initialState(), { board: b3, jaguar: 22, captured: 0, turn: 'J', ply: 10 });
     conv.jogar({ type: 'dog', from: 16, to: 11 }, posC);   // força a posição (lance não confere -> sincroniza)
-    await esperar(() => S.jaguar === 22 && seqOnline === 3, 2000);
+    await esperar(() => S.jaguar === 22 && seqOnline === 4, 2000);
     clicarPonto(22); clicarPonto(12); await ocioso(); clicarPonto(2); await ocioso();
-    await esperar(() => conv.estado && conv.estado.seq === 4, 2000);
+    await esperar(() => conv.estado && conv.estado.seq === 5, 2000);
     check('online: captura em cadeia chega inteira (2 pulos)', conv.estado && conv.estado.lance.type === 'capture' && conv.estado.lance.captured.length === 2 && conv.estado.estado.captured === 2, conv.estado && conv.estado.lance);
     // adversário cai e volta
     conv._transporte().cair();
@@ -5186,7 +5431,7 @@ async function autoteste() {
     check('online: "Ir para o início" fecha a sala', !$('telaInicio').hidden && sala === null);
     check('privacidade: ao sair, o chat some do aparelho', historicoChat.length === 0 && $('chatLista').children.length === 0 && $('miniLista').children.length === 0);
     await dormir(50);
-    const sobras = Object.keys(broker.retidos).filter((k) => k.indexOf(ON.PREFIXO + codigo + '/') === 0);
+    const sobras = Object.keys(broker.retidos).filter((k) => k.indexOf(conv.topico) === 0);
     check('privacidade: ao sair, nada da sala fica guardado no servidor', sobras.length === 0, sobras);
     // entrar pelo código: código inválido avisa
     irParaOnline('entrar'); $('campoCodigo').value = 'XX'; $('btnBuscarSala').click(); await dormir(30);
