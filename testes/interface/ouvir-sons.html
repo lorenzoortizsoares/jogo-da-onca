@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teste de áudio — Jogo da Onça</title>
+<style>
+  :root { --jen: #1B1A1F; --jen2: #26242B; --palha: #E3CF9F; --palha2: #C9AE74; --uru: #B8381E; --uru2: #D9502A; --mata: #2E5A3C; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 16px 40px; background: var(--jen); color: var(--palha);
+         font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  h2 { margin: 28px 0 8px; font-size: 17px; color: var(--palha2); }
+  p { margin: 0 0 14px; color: var(--palha2); }
+  .buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+  button { font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 8px; cursor: pointer;
+           background: var(--uru); color: #FBF1D9; border: 1px solid #00000040; }
+  button:hover { background: var(--uru2); }
+  button:focus-visible { outline: 3px solid #F2C14E; outline-offset: 2px; }
+  button.alt { background: transparent; color: var(--palha); border: 1.5px solid var(--palha2); }
+  button.alt[aria-pressed="false"] { opacity: .7; }
+  .viz { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+  figure { margin: 0; background: var(--jen2); border-radius: 10px; padding: 10px; }
+  figcaption { font-size: 13px; color: var(--palha2); margin-bottom: 6px; }
+  canvas { display: block; width: 100%; image-rendering: auto; border-radius: 4px; }
+  pre { white-space: pre-wrap; background: #111014; padding: 12px; border-radius: 8px; font-size: 12.5px; color: #d9cfb5; }
+  .ok { color: #8fd19e; } .bad { color: #ff7b6b; }
+</style>
+</head>
+<body>
+<h1>Teste de áudio</h1>
+<p>Sons sintetizados com Web Audio (sem arquivos). Clique para ouvir.</p>
+<div class="buttons">
+  <button type="button" data-snd="toc">Toc (forte)</button>
+  <button type="button" data-snd="tocSoft">Toc (leve)</button>
+  <button type="button" data-snd="tocSeq">Toc × 5</button>
+  <button type="button" data-snd="bark">Latido</button>
+  <button type="button" data-snd="roar">Rugido da onça</button>
+  <button type="button" data-snd="dogsWin">Vitória dos cachorros</button>
+  <button type="button" class="alt" id="mute" aria-pressed="true">Som ligado</button>
+</div>
+
+<h2>Análise offline (forma de onda + espectrograma 0–5 kHz)</h2>
+<div class="viz" id="viz"></div>
+
+<h2>Resultados</h2>
+<pre id="out">rodando…</pre>
+
+<script>
+  // captura de erros para inspeção via --dump-dom
+  window.__errors = [];
+  window.addEventListener('error', function (e) { window.__errors.push('error: ' + e.message + ' @' + (e.filename || '') + ':' + e.lineno); });
+  window.addEventListener('unhandledrejection', function (e) { window.__errors.push('rejection: ' + (e.reason && e.reason.message || e.reason)); });
+</script>
+<script src="../../codigo/audio.js"></script>
+<script>
+(function () {
+  'use strict';
+  var out = document.getElementById('out');
+  var lines = [];
+  var failures = 0;
+  function log(s) { lines.push(s); out.textContent = lines.join('\n'); }
+  function check(name, fn) {
+    try {
+      var r = fn();
+      if (r === false) { failures++; log('FALHOU  ' + name); }
+      else { log('ok      ' + name + (r === true || r === undefined ? '' : '  -> ' + r)); }
+    } catch (e) { failures++; log('ERRO    ' + name + ': ' + (e && e.message || e)); }
+  }
+
+  /* ---------- botões manuais ---------- */
+  var audio = window.createOncaAudio();
+  var muteBtn = document.getElementById('mute');
+  function syncMute() {
+    muteBtn.setAttribute('aria-pressed', audio.isMuted() ? 'false' : 'true');
+    muteBtn.textContent = audio.isMuted() ? 'Som desligado' : 'Som ligado';
+  }
+  syncMute();
+  muteBtn.addEventListener('click', function () { audio.unlock(); audio.setMuted(!audio.isMuted()); syncMute(); });
+  document.querySelectorAll('[data-snd]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      audio.unlock();
+      var s = b.getAttribute('data-snd');
+      if (s === 'toc') audio.toc(1);
+      else if (s === 'tocSoft') audio.toc(0.35);
+      else if (s === 'tocSeq') { for (var i = 0; i < 5; i++) setTimeout(function () { audio.toc(0.6 + Math.random() * 0.6); }, i * 260); }
+      else audio[s]();
+    });
+  });
+
+  /* ---------- 1) API: nenhuma chamada lança erro ---------- */
+  log('== API ==');
+  check('createOncaAudio é função', function () { return typeof window.createOncaAudio === 'function'; });
+  var methods = ['unlock', 'toc', 'bark', 'roar', 'dogsWin', 'setMuted', 'isMuted'];
+  check('métodos presentes', function () { return methods.every(function (m) { return typeof audio[m] === 'function'; }); });
+  var wasMuted = audio.isMuted();
+  check('setMuted(true) -> isMuted() === true', function () { audio.setMuted(true); return audio.isMuted() === true; });
+  check('mudo persiste no localStorage', function () { return localStorage.getItem('onca.muted') === '1'; });
+  check('nova instância lê o estado salvo', function () { return window.createOncaAudio().isMuted() === true; });
+  check('setMuted(false)', function () { audio.setMuted(false); return audio.isMuted() === false && localStorage.getItem('onca.muted') === '0'; });
+  check('chamadas antes do unlock (no-op silencioso)', function () { audio.toc(); audio.bark(); audio.roar(); audio.dogsWin(); });
+  check('unlock()', function () { audio.unlock(); audio.unlock(); });
+  check('toc() / toc(0.3) / toc(5) / toc("x") / toc(NaN)', function () { audio.toc(); audio.toc(0.3); audio.toc(5); audio.toc('x'); audio.toc(NaN); });
+  check('bark()', function () { audio.bark(); });
+  check('roar()', function () { audio.roar(); });
+  check('dogsWin()', function () { audio.dogsWin(); });
+  check('mudo: sons viram no-op', function () { audio.setMuted(true); audio.toc(); audio.bark(); audio.roar(); audio.dogsWin(); audio.setMuted(wasMuted); });
+  syncMute();
+
+  /* ---------- 2) sem Web Audio ---------- */
+  log('\n== sem Web Audio ==');
+  check('todos os métodos são no-op', function () {
+    var A = window.AudioContext, W = window.webkitAudioContext;
+    try {
+      window.AudioContext = undefined; window.webkitAudioContext = undefined;
+      var a2 = window.createOncaAudio();
+      a2.unlock(); a2.toc(); a2.bark(); a2.roar(); a2.dogsWin(); a2.setMuted(true); a2.setMuted(false);
+      return a2.supported === false && a2.isMuted() === false;
+    } finally { window.AudioContext = A; window.webkitAudioContext = W; }
+  });
+  check('AudioContext que lança no construtor', function () {
+    var A = window.AudioContext;
+    try {
+      window.AudioContext = function () { throw new Error('boom'); };
+      var a3 = window.createOncaAudio();
+      a3.unlock(); a3.toc(); a3.bark(); a3.roar(); a3.dogsWin();
+      return true;
+    } finally { window.AudioContext = A; }
+  });
+
+  /* ---------- 3) localStorage bloqueado ---------- */
+  log('\n== localStorage bloqueado ==');
+  check('get/setItem lançando erro', function () {
+    var g = Storage.prototype.getItem, s = Storage.prototype.setItem;
+    try {
+      Storage.prototype.getItem = function () { throw new Error('blocked'); };
+      Storage.prototype.setItem = function () { throw new Error('blocked'); };
+      var a4 = window.createOncaAudio();
+      a4.setMuted(true); var m = a4.isMuted(); a4.setMuted(false);
+      return m === true && a4.isMuted() === false;
+    } finally { Storage.prototype.getItem = g; Storage.prototype.setItem = s; }
+  });
+  check('window.localStorage inacessível', function () {
+    var desc = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    try {
+      Object.defineProperty(window, 'localStorage', { configurable: true, get: function () { throw new Error('denied'); } });
+      var a5 = window.createOncaAudio();
+      a5.setMuted(true);
+      return a5.isMuted() === true;
+    } finally { if (desc) Object.defineProperty(window, 'localStorage', desc); else delete window.localStorage; }
+  });
+
+  /* ---------- 4) renderização offline + análise ---------- */
+  log('\n== renderização offline (44,1 kHz) ==');
+  var SR = 44100;
+  var cases = [
+    { name: 'toc (1.0)', len: 0.22, fn: function (c, d) { audio._synth.toc(c, d, 0.02, 1); } },
+    { name: 'toc (0.35)', len: 0.22, fn: function (c, d) { audio._synth.toc(c, d, 0.02, 0.35); } },
+    { name: 'latido', len: 0.3, fn: function (c, d) { audio._synth.bark(c, d, 0.02, null); } },
+    { name: 'rugido', len: 1.8, fn: function (c, d) { audio._synth.roar(c, d, 0.02); } },
+    { name: 'vitória dos cachorros', len: 0.5, fn: function (c, d) { audio._synth.dogsWin(c, d, 0.02); } },
+    { name: 'estresse (tudo junto)', len: 2.0, fn: function (c, d) {
+        audio._synth.roar(c, d, 0.02); audio._synth.bark(c, d, 0.3, null); audio._synth.dogsWin(c, d, 0.5);
+        for (var i = 0; i < 6; i++) audio._synth.toc(c, d, 0.05 + i * 0.03, 1.6);
+      } }
+  ];
+
+  function fft(re, im) {
+    var n = re.length, i, j, k, len;
+    for (i = 1, j = 0; i < n; i++) {
+      var bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { var tr = re[i]; re[i] = re[j]; re[j] = tr; var ti = im[i]; im[i] = im[j]; im[j] = ti; }
+    }
+    for (len = 2; len <= n; len <<= 1) {
+      var ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (i = 0; i < n; i += len) {
+        var cr = 1, ci = 0;
+        for (k = 0; k < len / 2; k++) {
+          var a = i + k, b = a + len / 2;
+          var xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+          re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+          var ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+        }
+      }
+    }
+  }
+  function colormap(v) { // escuro -> verde-mata -> palha -> urucum claro
+    var stops = [[17, 16, 20], [31, 58, 42], [70, 120, 80], [227, 207, 159], [217, 80, 42], [255, 240, 220]];
+    var x = Math.max(0, Math.min(1, v)) * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(x)), f = x - i;
+    return [0, 1, 2].map(function (k) { return Math.round(stops[i][k] + (stops[i + 1][k] - stops[i][k]) * f); });
+  }
+  function draw(fig, buf) {
+    var d = buf.getChannelData(0), W = 600, Hw = 60, Hs = 160;
+    var cw = document.createElement('canvas'); cw.width = W; cw.height = Hw;
+    var g = cw.getContext('2d'); g.fillStyle = '#111014'; g.fillRect(0, 0, W, Hw);
+    g.strokeStyle = '#E3CF9F'; g.beginPath();
+    var per = d.length / W;
+    for (var x = 0; x < W; x++) {
+      var lo = 0, hi = 0;
+      for (var j = Math.floor(x * per); j < Math.floor((x + 1) * per); j++) { if (d[j] < lo) lo = d[j]; if (d[j] > hi) hi = d[j]; }
+      g.moveTo(x + .5, Hw / 2 - hi * Hw / 2); g.lineTo(x + .5, Hw / 2 - lo * Hw / 2 + 1);
+    }
+    g.stroke();
+    g.strokeStyle = '#D9502A55'; g.beginPath(); g.moveTo(0, 1); g.lineTo(W, 1); g.moveTo(0, Hw - 1); g.lineTo(W, Hw - 1); g.stroke();
+    var cs = document.createElement('canvas'); cs.width = W; cs.height = Hs;
+    var s = cs.getContext('2d'), img = s.createImageData(W, Hs), N = 1024;
+    var re = new Float32Array(N), im = new Float32Array(N), hann = new Float32Array(N);
+    for (var i = 0; i < N; i++) hann[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
+    var fmax = 5000, binHz = SR / N;
+    for (x = 0; x < W; x++) {
+      var off = Math.floor(x * (d.length - N) / W);
+      for (i = 0; i < N; i++) { re[i] = (d[off + i] || 0) * hann[i]; im[i] = 0; }
+      fft(re, im);
+      for (var y = 0; y < Hs; y++) {
+        var bin = Math.max(1, Math.round((1 - y / Hs) * fmax / binHz));
+        var mag = Math.sqrt(re[bin] * re[bin] + im[bin] * im[bin]) / (N / 4);
+        var db = 20 * Math.log10(mag + 1e-9);
+        var c = colormap((db + 80) / 80), p = (y * W + x) * 4;
+        img.data[p] = c[0]; img.data[p + 1] = c[1]; img.data[p + 2] = c[2]; img.data[p + 3] = 255;
+      }
+    }
+    s.putImageData(img, 0, 0);
+    s.fillStyle = '#E3CF9F99'; s.font = '10px sans-serif';
+    [1000, 2000, 3000, 4000].forEach(function (f) { var yy = Hs * (1 - f / fmax); s.fillRect(0, yy, 4, 1); s.fillText(f / 1000 + 'k', 6, yy + 3); });
+    fig.appendChild(cw); fig.appendChild(cs);
+  }
+  function analyze(buf) {
+    var d = buf.getChannelData(0), n = d.length, peak = 0, i;
+    for (i = 0; i < n; i++) { var a = Math.abs(d[i]); if (a > peak) peak = a; if (!isFinite(d[i])) return { bad: true }; }
+    var win = Math.round(SR * 0.005), rms = [];
+    for (i = 0; i < n; i += win) { var s = 0, c = 0; for (var j = i; j < Math.min(n, i + win); j++) { s += d[j] * d[j]; c++; } rms.push(Math.sqrt(s / c)); }
+    var maxR = Math.max.apply(null, rms), thr = maxR * 0.01, first = -1, last = -1, peakAt = 0;
+    rms.forEach(function (r, k) { if (r > thr) { if (first < 0) first = k; last = k; } if (r === maxR) peakAt = k; });
+    return { peak: peak, peakDb: 20 * Math.log10(peak), rmsDb: 20 * Math.log10(maxR), start: first * 0.005, end: (last + 1) * 0.005, peakAt: peakAt * 0.005 };
+  }
+
+  var viz = document.getElementById('viz');
+  var Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!Off) { log('OfflineAudioContext indisponível'); finish(); return; }
+  // todas as renderizações em paralelo; resultados exibidos na ordem dos casos
+  var settled = false;
+  var renders = cases.map(function (cs) {
+    var oc = new Off(1, Math.round(SR * cs.len), SR);
+    var o = audio._buildOutput(oc, oc.destination);
+    cs.fn(oc, o.input);
+    return oc.startRendering();
+  });
+  Promise.all(renders).then(function (bufs) {
+    bufs.forEach(function (buf, k) {
+      var cs = cases[k], r = analyze(buf);
+      var fig = document.createElement('figure');
+      var cap = document.createElement('figcaption');
+      cap.textContent = cs.name + ' — pico ' + r.peak.toFixed(3) + ' (' + r.peakDb.toFixed(1) + ' dBFS), ' +
+        'som de ' + (r.start * 1000 - 20).toFixed(0) + ' a ' + (r.end * 1000 - 20).toFixed(0) + ' ms';
+      fig.appendChild(cap); viz.appendChild(fig); draw(fig, buf);
+      var okPeak = r.peak < 0.99 && r.peak > 0.05;
+      if (!okPeak || r.bad) failures++;
+      log((okPeak ? 'ok      ' : 'FALHOU  ') + cs.name + ': pico=' + r.peak.toFixed(3) + ' (' + r.peakDb.toFixed(1) + ' dBFS)' +
+        ' rmsMax=' + r.rmsDb.toFixed(1) + ' dB  duração(-40dB)=' + Math.round((r.end - r.start) * 1000) + ' ms' +
+        '  pico RMS em ' + Math.round((r.peakAt - 0.02) * 1000) + ' ms');
+    });
+    settled = true; finish();
+  }, function (e) { settled = true; failures++; log('ERRO offline: ' + (e && e.message || e)); finish(); });
+
+  // Chrome headless com --virtual-time-budget: o tempo virtual "pula" enquanto a página
+  // está ociosa, mas a renderização offline roda em tempo real. Mantemos a thread
+  // principal ocupada em pequenos blocos até as renderizações terminarem.
+  (function keepBusy(n) {
+    if (settled || n > 4000) return;
+    var x = 0; for (var i = 0; i < 300000; i++) { x += i % 7; }
+    window.__busy = x;
+    setTimeout(function () { keepBusy(n + 1); }, 0);
+  })(0);
+
+  function finish() {
+    setTimeout(function () {
+      log('\n== erros da página ==\n' + (window.__errors.length ? window.__errors.join('\n') : '(nenhum)'));
+      if (window.__errors.length) failures += window.__errors.length;
+      log('\nRESULTADO: ' + (failures ? failures + ' FALHA(S)' : 'TUDO OK'));
+      document.body.setAttribute('data-done', failures ? 'fail' : 'ok');
+    }, 50);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+# relatórios e prints gerados pelos testes (recriados a cada execução)
+testes/relatorios/
+*.log

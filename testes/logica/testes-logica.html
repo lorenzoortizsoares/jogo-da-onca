@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Testes de regras e IA</title>
+<style>
+  :root { --bg:#fbf7ef; --ink:#1d160f; --ok:#1d6b35; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16120e; --ink:#efe6d6; --ok:#6fd08c; --bad:#ff8a80; } }
+  body { margin: 16px; background: var(--bg); color: var(--ink); font: 13px/1.45 Consolas, "Cascadia Mono", monospace; }
+  h1 { font: 600 18px/1.2 system-ui, sans-serif; margin: 0 0 8px; }
+  pre { white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<h1>Jogo da Onça — testes de regras + IA (dev/logic.js)</h1>
+<pre id="out">executando…</pre>
+<script>
+  window.__errors = [];
+  window.addEventListener('error', function (e) { window.__errors.push('error: ' + e.message + ' @' + (e.filename || '') + ':' + e.lineno); });
+  window.addEventListener('unhandledrejection', function (e) { window.__errors.push('unhandledrejection: ' + (e.reason && (e.reason.stack || e.reason))); });
+</script>
+<script src="../../codigo/logica.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.OncaLogic;
+  var lines = [], nPass = 0, nFail = 0, failures = [], notes = [];
+  var outEl = document.getElementById('out');
+  var tStart = performance.now();
+  var syncMs = 0, finished = false;
+
+  function render(status) {
+    var head = 'SUMMARY: ' + nPass + ' passed, ' + nFail + ' failed' + (status ? '  [' + status + ']' : '') +
+      '\nsync tests: ' + (syncMs / 1000).toFixed(1) + ' s' +
+      (failures.length ? '\nFAILED: ' + failures.join(' | ') : '') +
+      (window.__errors.length ? '\nPAGE ERRORS: ' + window.__errors.join(' | ') : '') +
+      (notes.length ? '\n\nNOTES:\n' + notes.join('\n') : '');
+    outEl.textContent = head + '\n\n' + lines.join('\n');
+  }
+  function test(name, fn) {
+    var t0 = performance.now();
+    try {
+      var info = fn();
+      nPass++;
+      lines.push('PASS  ' + name + (info ? '  -- ' + info : '') + '  (' + (performance.now() - t0).toFixed(0) + ' ms)');
+    } catch (e) {
+      nFail++;
+      failures.push(name);
+      lines.push('FAIL  ' + name + ': ' + (e && e.message) + (e && e.stack ? '\n        ' + String(e.stack).split('\n').slice(1, 4).join('\n        ') : ''));
+    }
+  }
+  function assert(c, msg) { if (!c) throw new Error(msg || 'assertion failed'); }
+  function eq(a, b, msg) {
+    var ja = JSON.stringify(a), jb = JSON.stringify(b);
+    if (ja !== jb) throw new Error((msg || 'not equal') + ': ' + ja + ' !== ' + jb);
+  }
+  function throws(fn, msg) {
+    var ok = false;
+    try { fn(); } catch (e) { ok = true; }
+    if (!ok) throw new Error((msg || 'expected an Error') + ' (nothing thrown)');
+  }
+  function I(r, c) { var i = L.index(r, c); if (i < 0) throw new Error('bad point ' + r + ',' + c); return i; }
+  function mk(o) {
+    var b = [], k;
+    for (k = 0; k < L.N; k++) b.push(0);
+    o.dogs.forEach(function (d) { if (b[d] !== 0) throw new Error('duplicate dog ' + d); b[d] = 1; });
+    if (b[o.jaguar] !== 0) throw new Error('jaguar placed on a dog');
+    b[o.jaguar] = 2;
+    // default 'captured' = consistent count when >= 10 dogs, otherwise 0 (sparse test boards)
+    return { board: b, jaguar: o.jaguar, captured: o.captured !== undefined ? o.captured : (o.dogs.length >= 10 ? 14 - o.dogs.length : 0),
+             turn: o.turn || 'J', ply: o.ply || 0, chain: o.chain || 0 };
+  }
+  function norm(m) {
+    if (!m) return m;
+    if (m.type === 'capture') return { type: 'capture', path: m.path.slice(), captured: m.captured.slice() };
+    return { type: m.type, from: m.from, to: m.to };
+  }
+  function key(m) { return JSON.stringify(norm(m)); }
+  function setKey(list) { return list.map(key).sort().join('|'); }
+  function isLegal(s, m) {
+    if (!m) return false;
+    var k = key(m);
+    return L.legalMoves(s).some(function (x) { return key(x) === k; });
+  }
+  function deepFreeze(o) {
+    if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); Object.keys(o).forEach(function (k) { deepFreeze(o[k]); }); }
+    return o;
+  }
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function randomGame(rand, plies) {
+    var s = L.initialState(), hist = [L.positionKey(s)];
+    for (var k = 0; k < plies; k++) {
+      if (L.winner(s)) break;
+      var ms = L.legalMoves(s);
+      if (!ms.length) break;
+      s = L.applyMove(s, ms[Math.floor(rand() * ms.length)]);
+      hist.push(L.positionKey(s));
+    }
+    return { state: s, history: hist };
+  }
+  function randomPositions(seed, count, maxPlies) {
+    var rand = mulberry32(seed), res = [], guard = 0;
+    while (res.length < count && guard++ < count * 20) {
+      var g = randomGame(rand, Math.floor(rand() * maxPlies));
+      if (L.winner(g.state) === null) res.push(g);
+    }
+    return res;
+  }
+  function world(i) { return { x: L.NODES[i].c - 2, z: L.NODES[i].r - 3 }; }
+  function countDogs(s) { return s.board.filter(function (v) { return v === 1; }).length; }
+
+  /* ================================================================ geometry */
+  test('geometria: 31 pontos, indices (r,c) e pontos invalidos', function () {
+    eq(L.N, 31, 'N'); eq(L.NODES.length, 31, 'NODES.length');
+    for (var i = 0; i < 25; i++) eq(L.NODES[i], { r: Math.floor(i / 5), c: i % 5 }, 'grid node ' + i);
+    eq(L.NODES.slice(25), [{ r: 5, c: 1 }, { r: 5, c: 2 }, { r: 5, c: 3 }, { r: 6, c: 0 }, { r: 6, c: 2 }, { r: 6, c: 4 }], 'toca nodes');
+    for (i = 0; i < 31; i++) eq(L.index(L.NODES[i].r, L.NODES[i].c), i, 'round trip ' + i);
+    [[5, 0], [5, 4], [6, 1], [6, 3], [7, 2], [-1, 0], [0, 5], [0, -1], [1.5, 2], ['1', 2], [null, 1]].forEach(function (p) {
+      eq(L.index(p[0], p[1]), -1, 'index(' + p + ')');
+    });
+    assert(Object.isFrozen(L.NODES) && Object.isFrozen(L.NODES[0]), 'NODES frozen');
+  });
+
+  test('geometria: 66 arestas = 40 ortogonais + 16 diagonais + 10 da toca, sem duplicatas', function () {
+    eq(L.EDGES.length, 66, 'EDGES.length');
+    var seen = {}, ortho = 0, diag = 0, toca = 0;
+    L.EDGES.forEach(function (e) {
+      assert(e.length === 2 && e[0] >= 0 && e[1] < 31 && e[0] !== e[1], 'edge ' + e);
+      var k = Math.min(e[0], e[1]) + '-' + Math.max(e[0], e[1]);
+      assert(!seen[k], 'duplicate edge ' + k); seen[k] = 1;
+      var a = L.NODES[e[0]], b = L.NODES[e[1]];
+      if (e[0] >= 25 || e[1] >= 25) toca++;
+      else if (Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1) ortho++;
+      else if (Math.abs(a.r - b.r) === 1 && Math.abs(a.c - b.c) === 1) diag++;
+      else throw new Error('weird edge ' + e);
+    });
+    eq([ortho, diag, toca], [40, 16, 10], 'by category');
+    var tocaList = [[4, 2, 5, 1], [4, 2, 5, 2], [4, 2, 5, 3], [5, 1, 5, 2], [5, 2, 5, 3], [5, 1, 6, 0], [5, 2, 6, 2], [5, 3, 6, 4], [6, 0, 6, 2], [6, 2, 6, 4]];
+    tocaList.forEach(function (t) {
+      var a = I(t[0], t[1]), b = I(t[2], t[3]);
+      assert(seen[Math.min(a, b) + '-' + Math.max(a, b)], 'missing toca edge ' + t);
+    });
+  });
+
+  test('geometria: ADJ simetrica, igual a EDGES, graus', function () {
+    var sum = 0;
+    for (var a = 0; a < 31; a++) {
+      sum += L.ADJ[a].length;
+      L.ADJ[a].forEach(function (b) { assert(L.ADJ[b].indexOf(a) >= 0, 'asymmetric ' + a + '-' + b); });
+    }
+    eq(sum, 132, 'sum of degrees');
+    L.EDGES.forEach(function (e) { assert(L.ADJ[e[0]].indexOf(e[1]) >= 0, 'edge not in ADJ ' + e); });
+    var deg = function (r, c) { return L.ADJ[I(r, c)].length; };
+    eq([deg(2, 2), deg(0, 0), deg(0, 1), deg(1, 1), deg(4, 2), deg(4, 0), deg(5, 1), deg(5, 2), deg(5, 3), deg(6, 0), deg(6, 2), deg(6, 4)],
+       [8, 3, 3, 8, 8, 3, 3, 4, 3, 2, 3, 2], 'degrees');
+  });
+
+  test('geometria: diagonais so entre pontos com (r+c) par', function () {
+    L.EDGES.forEach(function (e) {
+      if (e[0] >= 25 || e[1] >= 25) return;
+      var a = L.NODES[e[0]], b = L.NODES[e[1]];
+      if (a.r !== b.r && a.c !== b.c) assert((a.r + a.c) % 2 === 0 && (b.r + b.c) % 2 === 0, 'odd diagonal ' + e);
+    });
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 4; c++) {
+      var d1 = L.ADJ[I(r, c)].indexOf(I(r + 1, c + 1)) >= 0, d2 = L.ADJ[I(r, c + 1)].indexOf(I(r + 1, c)) >= 0;
+      assert(d1 !== d2, 'exactly one diagonal per cell ' + r + ',' + c);
+    }
+  });
+
+  function hasJump(a, o, t) { return L.JUMPS[a].some(function (j) { return j.over === o && j.to === t; }); }
+
+  test('geometria: exemplos de pulo do enunciado existem', function () {
+    var ex = [[[6, 0], [6, 2], [6, 4]], [[5, 1], [5, 2], [5, 3]], [[3, 1], [4, 2], [5, 3]], [[2, 2], [3, 2], [4, 2]],
+              [[3, 2], [4, 2], [5, 2]], [[4, 2], [5, 2], [6, 2]]];
+    ex.forEach(function (x) {
+      assert(hasJump(I(x[0][0], x[0][1]), I(x[1][0], x[1][1]), I(x[2][0], x[2][1])), 'missing jump ' + JSON.stringify(x));
+      assert(hasJump(I(x[2][0], x[2][1]), I(x[1][0], x[1][1]), I(x[0][0], x[0][1])), 'missing reverse jump ' + JSON.stringify(x));
+    });
+  });
+
+  test('geometria: pulos retos, simetricos, dentro do tabuleiro e = busca geometrica exaustiva', function () {
+    var total = 0, mine = {}, brute = {};
+    for (var a = 0; a < 31; a++) L.JUMPS[a].forEach(function (j) {
+      total++;
+      assert(j.over >= 0 && j.over < 31 && j.to >= 0 && j.to < 31, 'jump leaves the board ' + a + '/' + JSON.stringify(j));
+      assert(L.ADJ[a].indexOf(j.over) >= 0 && L.ADJ[j.over].indexOf(j.to) >= 0, 'jump not along edges');
+      var A = world(a), B = world(j.over), C = world(j.to);
+      assert(B.x - A.x === C.x - B.x && B.z - A.z === C.z - B.z, 'jump not straight/equal ' + a + '>' + j.to);
+      assert(hasJump(j.to, j.over, a), 'reverse missing');
+      mine[a + '>' + j.over + '>' + j.to] = 1;
+    });
+    // exhaustive: two consecutive edges with the same world direction and length
+    for (a = 0; a < 31; a++) L.ADJ[a].forEach(function (b) {
+      L.ADJ[b].forEach(function (c) {
+        if (c === a) return;
+        var A = world(a), B = world(b), C = world(c);
+        if (B.x - A.x === C.x - B.x && B.z - A.z === C.z - B.z) brute[a + '>' + b + '>' + c] = 1;
+      });
+    });
+    eq(Object.keys(mine).sort(), Object.keys(brute).sort(), 'JUMPS vs brute force');
+    return total + ' jumps';
+  });
+
+  test('geometria: pulos a partir de (6,0) (6,2) (6,4) (5,1) (5,2) (5,3) (4,2)', function () {
+    function js(r, c) {
+      return L.JUMPS[I(r, c)].map(function (j) { return L.NODES[j.over].r + ',' + L.NODES[j.over].c + '>' + L.NODES[j.to].r + ',' + L.NODES[j.to].c; }).sort();
+    }
+    eq(js(6, 0), ['5,1>4,2', '6,2>6,4'], '(6,0)');
+    eq(js(6, 4), ['5,3>4,2', '6,2>6,0'], '(6,4)');
+    eq(js(6, 2), ['5,2>4,2'], '(6,2)');
+    eq(js(5, 1), ['4,2>3,3', '5,2>5,3'], '(5,1)');
+    eq(js(5, 3), ['4,2>3,1', '5,2>5,1'], '(5,3)');
+    eq(js(5, 2), ['4,2>3,2'], '(5,2)');
+    eq(js(4, 2), ['3,1>2,0', '3,2>2,2', '3,3>2,4', '4,1>4,0', '4,3>4,4', '5,1>6,0', '5,2>6,2', '5,3>6,4'], '(4,2)');
+  });
+
+  test('geometria: linhas da toca continuam as diagonais e a linha central (mapeamento 3D)', function () {
+    [[[2, 0], [3, 1], [4, 2], [5, 3], [6, 4]], [[2, 4], [3, 3], [4, 2], [5, 1], [6, 0]], [[0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [5, 2], [6, 2]]].forEach(function (line) {
+      for (var k = 1; k < line.length; k++) {
+        var a = I(line[k - 1][0], line[k - 1][1]), b = I(line[k][0], line[k][1]);
+        assert(L.ADJ[a].indexOf(b) >= 0, 'not an edge ' + line[k - 1] + '-' + line[k]);
+        if (k > 1) {
+          var p = I(line[k - 2][0], line[k - 2][1]);
+          var A = world(p), B = world(a), C = world(b);
+          assert(B.x - A.x === C.x - B.x && B.z - A.z === C.z - B.z, 'not straight at ' + line[k]);
+        }
+      }
+    });
+    var t = world(I(6, 0)), g = world(I(0, 0));
+    eq([g.x, g.z, t.x, t.z], [-2, -3, -2, 3], 'world coordinates');
+  });
+
+  /* ================================================================ state & moves */
+  test('estado inicial: 14 caes, onca no 12, vez da onca', function () {
+    var s = L.initialState();
+    eq(s.jaguar, 12); eq(s.board[12], 2); eq(s.turn, 'J'); eq(s.captured, 0); eq(s.ply, 0);
+    eq(countDogs(s), 14, 'dogs');
+    for (var i = 0; i < 31; i++) if (i !== 12) eq(s.board[i], L.NODES[i].r <= 2 ? 1 : 0, 'point ' + i);
+    eq(L.winner(s), null);
+    var k = L.positionKey(s);
+    eq(k.length, 32); eq(k.charAt(31), 'J');
+    eq(k, '11111111111121100000000000000000'.slice(0, 31) + 'J');
+    assert(JSON.parse(JSON.stringify(s)).board.length === 31, 'JSON serialisable');
+    var c = L.cloneState(s); c.board[0] = 0;
+    eq(s.board[0], 1, 'clone is deep');
+  });
+
+  test('geracao de lances: posicao inicial', function () {
+    var s = L.initialState();
+    eq(L.jaguarSteps(s), [16, 17, 18]);
+    eq(L.jaguarCaptures(s), []);
+    eq(setKey(L.legalMoves(s)), setKey([16, 17, 18].map(function (t) { return { type: 'step', from: 12, to: t }; })));
+    var d = L.applyJaguarStep(s, 17);
+    eq(d.turn, 'D'); eq(d.ply, 1);
+    var dm = L.dogMoves(d).map(function (m) { return m.from + '>' + m.to; }).sort();
+    eq(dm, ['10>15', '10>16', '11>12', '11>16', '13>12', '13>18', '14>18', '14>19', '6>12', '7>12', '8>12'].sort(), 'dog moves after J 12>17');
+    eq(L.dogMoves(s).length, 6, 'dog moves at the very start (geometry only)');
+  });
+
+  test('geracao de lances: posicoes montadas (grade e toca)', function () {
+    var s = mk({ jaguar: 12, dogs: [7, 17] });
+    eq(L.jaguarCaptures(s), [{ over: 7, to: 2 }, { over: 17, to: 22 }].sort(function (a, b) { return a.over - b.over; }));
+    eq(L.jaguarSteps(s).length, 6);
+    s = mk({ jaguar: 12, dogs: [17, 22] });
+    eq(L.jaguarCaptures(s), [], 'blocked landing');
+    s = mk({ jaguar: 22, dogs: [25, 26, 27] });
+    eq(L.jaguarCaptures(s).map(function (c) { return c.over + '>' + c.to; }).sort(), ['25>28', '26>29', '27>30']);
+    s = mk({ jaguar: 28, dogs: [25, 29] });
+    eq(L.jaguarCaptures(s).map(function (c) { return c.over + '>' + c.to; }).sort(), ['25>22', '29>30']);
+    eq(L.jaguarSteps(s), [], 'no steps from (6,0) when both neighbours are dogs');
+    s = mk({ jaguar: 0, dogs: [29], turn: 'D' });
+    eq(L.dogMoves(s).map(function (m) { return m.to; }).sort(), [26, 28, 30]);
+    s = mk({ jaguar: 22, dogs: [17] });
+    eq(L.jaguarCaptures(s, 2), [{ over: 7, to: 12 }].filter(function () { return false; }), 'from=2 without dog at 7');
+    s = mk({ jaguar: 22, dogs: [7] });
+    eq(L.jaguarCaptures(s, 2), [{ over: 7, to: 12 }], 'explicit from parameter');
+  });
+
+  test('captura simples: tabuleiro, contagem, turno nao passa', function () {
+    var s = mk({ jaguar: 12, dogs: [17, 0, 1] });
+    var a = L.applyJaguarCapture(s, 17, 22);
+    eq(a.board[12], 0); eq(a.board[17], 0); eq(a.board[22], 2); eq(a.jaguar, 22);
+    eq(a.captured, s.captured + 1); eq(a.turn, 'J'); eq(a.ply, s.ply); eq(a.chain, 1);
+    var e = L.endJaguarTurn(a);
+    eq(e.turn, 'D'); eq(e.ply, s.ply + 1); eq(e.chain, 0);
+  });
+
+  // chain 0 -> 2 -> 12 -> 22 over 1, 7, 17
+  var chainPos = mk({ jaguar: 0, dogs: [1, 7, 17, 20, 24] });
+
+  test('captura multipla: prefixos em legalMoves', function () {
+    var ms = L.legalMoves(chainPos);
+    var caps = ms.filter(function (m) { return m.type === 'capture'; });
+    eq(setKey(caps), setKey([
+      { type: 'capture', path: [0, 2], captured: [1] },
+      { type: 'capture', path: [0, 2, 12], captured: [1, 7] },
+      { type: 'capture', path: [0, 2, 12, 22], captured: [1, 7, 17] }
+    ]));
+    eq(ms.filter(function (m) { return m.type === 'step'; }).map(function (m) { return m.to; }).sort(), [5, 6]);
+  });
+
+  test('captura multipla: passo a passo (chain, sem passos no meio, endJaguarTurn)', function () {
+    var a = L.applyJaguarCapture(chainPos, 1, 2);
+    eq([a.turn, a.chain, a.captured, a.ply], ['J', 1, chainPos.captured + 1, 0]);
+    eq(L.jaguarSteps(a), [], 'no steps mid-chain');
+    eq(L.jaguarCaptures(a), [{ over: 7, to: 12 }]);
+    eq(L.winner(a), null);
+    throws(function () { L.applyJaguarStep(a, 1); }, 'step after capture must throw');
+    eq(setKey(L.legalMoves(a)), setKey([{ type: 'capture', path: [2, 12], captured: [7] }, { type: 'capture', path: [2, 12, 22], captured: [7, 17] }]), 'mid-chain legal moves');
+    var b = L.applyJaguarCapture(a, 7, 12);
+    var c = L.applyJaguarCapture(b, 17, 22);
+    eq([c.jaguar, c.captured, c.chain, c.turn], [22, chainPos.captured + 3, 3, 'J']);
+    eq(L.jaguarCaptures(c), []);
+    var e = L.endJaguarTurn(c);
+    eq([e.turn, e.ply, e.chain], ['D', 1, 0]);
+    throws(function () { L.endJaguarTurn(chainPos); }, 'cannot pass without capturing');
+    throws(function () { L.endJaguarTurn(e); }, 'endJaguarTurn on dogs turn');
+  });
+
+  test('captura multipla: applyMove com cadeia completa e com prefixo', function () {
+    var full = L.applyMove(chainPos, { type: 'capture', path: [0, 2, 12, 22], captured: [1, 7, 17] });
+    var manual = L.endJaguarTurn(L.applyJaguarCapture(L.applyJaguarCapture(L.applyJaguarCapture(chainPos, 1, 2), 7, 12), 17, 22));
+    eq(full, manual, 'full chain');
+    var pre = L.applyMove(chainPos, { type: 'capture', path: [0, 2], captured: [1] });
+    eq([pre.jaguar, pre.turn, pre.captured, pre.board[7]], [2, 'D', chainPos.captured + 1, 1], 'prefix');
+    var noCap = L.applyMove(chainPos, { type: 'capture', path: [0, 2, 12] });
+    eq(noCap.jaguar, 12, 'captured list optional');
+    throws(function () { L.applyMove(chainPos, { type: 'capture', path: [0, 2, 12], captured: [1, 6] }); }, 'wrong captured list');
+    throws(function () { L.applyMove(chainPos, { type: 'capture', path: [0, 2, 22] }); }, 'invalid path');
+  });
+
+  test('captura multipla: ramificacao e laco que volta a casa de origem', function () {
+    // loop 12 -> 14 -> 4 -> 2 -> 12 over 13, 9, 3, 7 (and the reverse loop)
+    var s = mk({ jaguar: 12, dogs: [13, 9, 3, 7, 20] });
+    var ms = L.legalMoves(s).filter(function (m) { return m.type === 'capture'; });
+    var loop = ms.filter(function (m) { return m.path.length === 5 && m.path[4] === 12; });
+    eq(loop.length, 2, 'two loop chains');
+    var after = L.applyMove(s, loop[0]);
+    eq([after.jaguar, after.captured, countDogs(after), after.turn], [12, s.captured + 4, 1, 'D']);
+    // branching: from 12 both 12>14 (over 13) and 12>2 (over 7)
+    var firsts = {};
+    ms.forEach(function (m) { firsts[m.path[1]] = 1; });
+    eq(Object.keys(firsts).sort(), ['14', '2'], 'two first jumps');
+    // search random boards for a chain that lands on a point whose dog it captured earlier
+    var rand = mulberry32(5150), found = null, tries = 0, ai = L.createAI();
+    while (!found && tries++ < 30000) {
+      var j = Math.floor(rand() * 31), dogs = [];
+      for (var p = 0; p < 31; p++) if (p !== j && rand() < 0.45) dogs.push(p);
+      var bs = mk({ jaguar: j, dogs: dogs, captured: 0 });
+      L.legalMoves(bs).some(function (m) {
+        if (m.type !== 'capture') return false;
+        for (var k = 2; k < m.path.length; k++) if (m.captured.slice(0, k - 1).indexOf(m.path[k]) >= 0) { found = { s: bs, m: m }; return true; }
+        return false;
+      });
+    }
+    assert(found, 'no such chain found in ' + tries + ' random boards');
+    var exp = L.applyMove(found.s, found.m);
+    var eng = ai._debugAfterMoves(found.s).filter(function (a) { return key(a.move) === key(found.m); })[0];
+    assert(eng && !eng.errors.length, 'engine make/unmake on that chain');
+    eq([eng.board, eng.jaguar, eng.captured], [exp.board, exp.jaguar, exp.captured], 'engine vs applyMove');
+    return 'example chain ' + found.m.path.join('-') + ' capturing ' + found.m.captured.join(',');
+  });
+
+  test('captura: cadeias param ao 5o cao (captured 3 => no maximo 2 pulos)', function () {
+    var s = mk({ jaguar: 0, dogs: [1, 7, 17, 20, 24, 4, 9, 14, 10, 15, 19], captured: 3 });
+    var ms = L.legalMoves(s), maxLen = 0;
+    ms.forEach(function (m) { if (m.type === 'capture') maxLen = Math.max(maxLen, m.captured.length); });
+    eq(maxLen, 2);
+    var w = L.applyMove(s, { type: 'capture', path: [0, 2, 12], captured: [1, 7] });
+    eq(L.winner(w), 'J');
+  });
+
+  /* ================================================================ winner */
+  test('vencedor: onca presa na toca (varias configuracoes)', function () {
+    var s = mk({ jaguar: 28, dogs: [25, 29, 22, 30, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9] });
+    eq(L.winner(s), 'D', '(6,0) trapped');
+    eq(L.legalMoves(s), [], 'no legal move');
+    s.turn = 'D';
+    eq(L.winner(s), null, 'on the dogs turn the game goes on');
+    s = mk({ jaguar: 29, dogs: [26, 28, 30, 22, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9] });
+    eq(L.winner(s), 'D', '(6,2) trapped');
+    s = mk({ jaguar: 26, dogs: [22, 25, 27, 29, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8] });
+    eq(L.winner(s), 'D', '(5,2) trapped (all jumps blocked/out of board)');
+    s = mk({ jaguar: 28, dogs: [25, 29, 22, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+    eq(L.winner(s), null, 'escape by capturing over (6,2)');
+  });
+
+  test('vencedor: onca presa fora da toca (canto e meio)', function () {
+    var s = mk({ jaguar: 0, dogs: [1, 5, 6, 2, 10, 12, 3, 4, 7, 8, 9, 11, 13, 14] });
+    eq(L.winner(s), 'D', 'corner');
+    s = mk({ jaguar: 1, dogs: [0, 2, 6, 3, 11, 5, 7, 4, 8, 9, 10, 12, 13, 14] });
+    eq(L.winner(s), 'D', 'edge (0,1)');
+    s = mk({ jaguar: 1, dogs: [0, 2, 6, 3, 5, 7, 4, 8, 9, 10, 12, 13, 14] });
+    eq(L.winner(s), null, 'jump over (1,1) to (2,1) open');
+  });
+
+  test('vencedor: 5 capturas', function () {
+    var s = mk({ jaguar: 22, dogs: [0, 1, 2, 3, 4, 5, 6, 7, 8], captured: 5, turn: 'D' });
+    eq(L.winner(s), 'J');
+    s.turn = 'J'; eq(L.winner(s), 'J');
+    s = mk({ jaguar: 22, dogs: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], captured: 4, turn: 'D' });
+    eq(L.winner(s), null);
+  });
+
+  test('vencedor: caes sem lances na vez deles => onca (caso artificial)', function () {
+    // 6 dogs filling the toca with the jaguar on (4,2). With 14 dogs this cannot happen in real play
+    // (needs 8 captures), so 'captured' is forced to 0 to test the rule on its own.
+    var s = mk({ jaguar: 22, dogs: [25, 26, 27, 28, 29, 30], captured: 0, turn: 'D' });
+    eq(L.dogMoves(s), []);
+    eq(L.winner(s), 'J');
+    eq(L.legalMoves(s), []);
+    s.turn = 'J';
+    eq(L.winner(s), null, 'jaguar still has steps');
+    notes.push('- "dogs without moves" is unreachable with < 5 captures (a dog block needs the jaguar on (4,2) and the 6 toca points); tested with an artificial state.');
+  });
+
+  test('vencedor: no meio de uma cadeia => null', function () {
+    var a = L.applyJaguarCapture(chainPos, 1, 2);
+    eq(L.winner(a), null);
+  });
+
+  test('lances ilegais lancam Error', function () {
+    var s = L.initialState();
+    throws(function () { L.applyDogMove(s, 10, 15); }, 'dog move on jaguar turn');
+    throws(function () { L.applyJaguarStep(s, 7); }, 'step onto a dog');
+    throws(function () { L.applyJaguarStep(s, 22); }, 'non adjacent step');
+    throws(function () { L.applyJaguarCapture(s, 17, 22); }, 'capture over empty');
+    var d = L.applyJaguarStep(s, 17);
+    throws(function () { L.applyJaguarStep(d, 22); }, 'jaguar on dogs turn');
+    throws(function () { L.applyDogMove(d, 10, 20); }, 'non adjacent dog move');
+    throws(function () { L.applyDogMove(d, 10, 11); }, 'onto a dog');
+    throws(function () { L.applyDogMove(d, 15, 20); }, 'no dog there');
+    throws(function () { L.applyDogMove(d, 11, 17); }, 'onto the jaguar');
+    throws(function () { L.applyMove(d, { type: 'jump' }); }, 'unknown type');
+    throws(function () { L.applyMove(s, { type: 'step', from: 3, to: 16 }); }, 'step from wrong point');
+    var over = mk({ jaguar: 22, dogs: [0, 1, 2, 3, 4, 5, 6, 7, 8], captured: 5, turn: 'D' });
+    throws(function () { L.applyDogMove(over, 0, 10); }, 'game over');
+  });
+
+  test('imutabilidade da API publica (estados congelados)', function () {
+    var states = [L.initialState(), mk({ jaguar: 0, dogs: [1, 7, 17, 20, 24] }), L.applyJaguarStep(L.initialState(), 17),
+                  L.applyJaguarCapture(chainPos, 1, 2)];
+    states.forEach(function (s0, idx) {
+      var s = deepFreeze(JSON.parse(JSON.stringify(s0)));
+      var before = JSON.stringify(s);
+      var hist = deepFreeze([L.positionKey(s0)]);
+      var c = L.cloneState(s); assert(c.board !== s.board, 'clone shares board');
+      L.dogMoves(s); L.jaguarSteps(s); L.jaguarCaptures(s); L.legalMoves(s); L.winner(s); L.positionKey(s);
+      var ms = L.legalMoves(s);
+      ms.forEach(function (m) {
+        var r = L.applyMove(s, m);
+        assert(r !== s && r.board !== s.board, 'new state expected');
+        r.board[0] = 9;
+      });
+      if (s.turn === 'J') {
+        L.jaguarSteps(s).forEach(function (t) { L.applyJaguarStep(s, t); });
+        L.jaguarCaptures(s).forEach(function (cp) { var x = L.applyJaguarCapture(s, cp.over, cp.to); L.endJaguarTurn(x); });
+      } else L.dogMoves(s).forEach(function (m) { L.applyDogMove(s, m.from, m.to); });
+      for (var lv = 1; lv <= 4; lv++) {
+        var res = L.chooseMoveWithStats(s, lv, { timeLimitMs: 40, history: hist });
+        assert(!res.stats.error, 'AI error (mutation?): ' + res.stats.error);
+      }
+      eq(JSON.stringify(s), before, 'state ' + idx + ' changed');
+    });
+  });
+
+  test('motor: geracao interna = legalMoves; make/unmake/hash consistentes (300 posicoes aleatorias)', function () {
+    var ai = L.createAI(), pos = randomPositions(1234, 300, 140), moves = 0, capt = 0, longest = 0;
+    pos.forEach(function (g) {
+      var s = g.state, after = ai._debugAfterMoves(s), legal = L.legalMoves(s);
+      eq(setKey(after.map(function (a) { return a.move; })), setKey(legal), 'move sets differ at ' + L.positionKey(s));
+      after.forEach(function (a) {
+        assert(!a.errors.length, a.errors.join(', '));
+        var exp = L.applyMove(s, a.move);
+        eq([a.board, a.jaguar, a.captured, a.turn], [exp.board, exp.jaguar, exp.captured, exp.turn], 'make result for ' + key(a.move));
+        moves++;
+        if (a.move.type === 'capture') { capt++; longest = Math.max(longest, a.move.captured.length); }
+      });
+    });
+    return pos.length + ' positions, ' + moves + ' moves checked (' + capt + ' captures, longest chain ' + longest + ')';
+  });
+
+  /* ================================================================ AI */
+  test('IA: null sem lances / jogo terminado; nunca lanca com estado invalido', function () {
+    var trapped = mk({ jaguar: 28, dogs: [25, 29, 22, 30, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9] });
+    var over = mk({ jaguar: 22, dogs: [0, 1, 2, 3, 4, 5, 6, 7, 8], captured: 5, turn: 'D' });
+    var noDog = mk({ jaguar: 22, dogs: [25, 26, 27, 28, 29, 30], captured: 0, turn: 'D' });
+    for (var lv = 1; lv <= 4; lv++) {
+      eq(L.chooseMove(trapped, lv, { timeLimitMs: 50 }), null, 'trapped L' + lv);
+      eq(L.chooseMove(over, lv, { timeLimitMs: 50 }), null, 'game over L' + lv);
+      eq(L.chooseMove(noDog, lv, { timeLimitMs: 50 }), null, 'dogs blocked L' + lv);
+      eq(L.chooseMove({ board: [1, 2] }, lv), null, 'invalid state -> null');
+      eq(L.chooseMove(null, lv), null, 'null state -> null');
+    }
+    var s = L.initialState();
+    assert(isLegal(s, L.chooseMove(s, 0)) && isLegal(s, L.chooseMove(s, 9)) && isLegal(s, L.chooseMove(s, 'x')), 'level clamped');
+  });
+
+  // dogs in rows 0-1 + (2,0) (2,4): jaguar at 12 can take the lone dog at 17
+  var freeCap = mk({ jaguar: 12, dogs: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 17], turn: 'J' });
+
+  test('IA: aceita captura gratis (niveis 2-4 sempre; Basico na maioria das vezes)', function () {
+    var want = { type: 'capture', path: [12, 22], captured: [17] };
+    for (var lv = 2; lv <= 4; lv++) eq(norm(L.chooseMove(freeCap, lv, { timeLimitMs: 300 })), want, 'level ' + lv);
+    var rand = mulberry32(99), took = 0, n = 60;
+    for (var k = 0; k < n; k++) { var m = L.chooseMove(freeCap, 1, { rng: rand }); if (m && m.type === 'capture') took++; }
+    assert(took / n >= 0.7, 'Basico took the capture only ' + took + '/' + n);
+    return 'Basico capturou em ' + took + '/' + n;
+  });
+
+  test('IA: 5a captura = vitoria imediata (niveis 2-4)', function () {
+    var s = mk({ jaguar: 12, dogs: [0, 1, 2, 3, 4, 5, 6, 8, 9, 17], captured: 4, turn: 'J' });
+    for (var lv = 2; lv <= 4; lv++) {
+      var m = L.chooseMove(s, lv, { timeLimitMs: 300 });
+      assert(m && m.type === 'capture', 'level ' + lv + ' did not capture: ' + JSON.stringify(m));
+      eq(L.winner(L.applyMove(s, m)), 'J');
+    }
+  });
+
+  test('IA: caes prendem a onca em 1 lance (niveis 2-4)', function () {
+    var s = mk({ jaguar: 28, dogs: [25, 22, 30, 26, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9], turn: 'D' });
+    for (var lv = 2; lv <= 4; lv++) {
+      var m = L.chooseMove(s, lv, { timeLimitMs: 300 });
+      eq(norm(m), { type: 'dog', from: 26, to: 29 }, 'level ' + lv);
+      eq(L.winner(L.applyMove(s, m)), 'D');
+    }
+  });
+
+  test('IA: caes salvam o cao ameacado (niveis 2-4)', function () {
+    var s = mk({ jaguar: 12, dogs: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 17], turn: 'D' });
+    eq(L.jaguarCaptures(s), [{ over: 17, to: 22 }], 'exactly one threat');
+    for (var lv = 2; lv <= 4; lv++) eq(norm(L.chooseMove(s, lv, { timeLimitMs: 400 })), { type: 'dog', from: 17, to: 22 }, 'level ' + lv);
+  });
+
+  test('IA: onca evita entrar numa armadilha de 1 lance (niveis 2-4)', function () {
+    // jaguar on (4,2): stepping into (5,2) loses at once (dog 21 -> 22 closes the toca); 16, 18, 23 are safe
+    var s = mk({ jaguar: 22, dogs: [17, 21, 25, 27, 28, 30, 29, 12, 20, 0, 1, 2, 3], turn: 'J' });
+    var legal = L.legalMoves(s);
+    var losing = legal.filter(function (m) {
+      var a = L.applyMove(s, m);
+      return L.dogMoves(a).some(function (dm) { return L.winner(L.applyDogMove(a, dm.from, dm.to)) === 'D'; });
+    });
+    assert(losing.length > 0 && losing.length < legal.length, 'test position should mix losing and safe moves (' + losing.length + '/' + legal.length + ')');
+    for (var lv = 2; lv <= 4; lv++) {
+      var m = L.chooseMove(s, lv, { timeLimitMs: 400 });
+      assert(!losing.some(function (x) { return key(x) === key(m); }), 'level ' + lv + ' walked into a trap: ' + key(m));
+    }
+    return losing.length + ' of ' + legal.length + ' moves lose at once';
+  });
+
+  test('IA: no meio de uma cadeia so escolhe capturas (ou null)', function () {
+    var a = L.applyJaguarCapture(chainPos, 1, 2);
+    for (var lv = 1; lv <= 4; lv++) {
+      var m = L.chooseMove(a, lv, { timeLimitMs: 100 });
+      assert(m && m.type === 'capture' && m.path[0] === 2 && isLegal(a, m), 'L' + lv + ' ' + JSON.stringify(m));
+    }
+    var c = L.applyJaguarCapture(L.applyJaguarCapture(a, 7, 12), 17, 22);
+    eq(L.chooseMove(c, 3, { timeLimitMs: 100 }), null, 'chain cannot continue');
+  });
+
+  test('IA: historico evita repetir posicao (nivel 3, posicao inicial simetrica)', function () {
+    var s = L.initialState();
+    var key16 = L.positionKey(L.applyJaguarStep(s, 16)), key18 = L.positionKey(L.applyJaguarStep(s, 18));
+    var m1 = L.chooseMove(s, 3, { timeLimitMs: 300, history: [L.positionKey(s), key16, L.positionKey(s), key16] });
+    assert(m1.to !== 16, 'repeated 16 anyway');
+    var m2 = L.chooseMove(s, 3, { timeLimitMs: 300, history: [key18, key18, key18] });
+    assert(m2.to !== 18, 'repeated 18 anyway');
+    return 'with 16 seen -> ' + m1.to + ', with 18 seen -> ' + m2.to;
+  });
+
+  test('IA: fuzz de legalidade - 4 niveis x 80 posicoes aleatorias alcancaveis', function () {
+    var pos = randomPositions(777, 80, 160), rand = mulberry32(4242), calls = 0, nulls = 0;
+    var limits = { 1: 250, 2: 60, 3: 60, 4: 80 };
+    pos.forEach(function (g) {
+      var s = g.state, legal = L.legalMoves(s);
+      for (var lv = 1; lv <= 4; lv++) {
+        var r = L.chooseMoveWithStats(s, lv, { timeLimitMs: limits[lv], rng: rand, history: g.history });
+        calls++;
+        assert(!r.stats.error, 'internal error ' + r.stats.error);
+        if (!legal.length) { eq(r.move, null, 'expected null'); nulls++; continue; }
+        assert(isLegal(s, r.move), 'illegal move L' + lv + ' ' + key(r.move) + ' at ' + L.positionKey(s));
+        L.applyMove(s, r.move);
+      }
+    });
+    return calls + ' calls, ' + nulls + ' null';
+  });
+
+  /* ================================================================ worker (direct) */
+  test('worker: handleWorkerMessage com postMessage falso', function () {
+    var got = [];
+    var s = L.applyJaguarStep(L.initialState(), 17);
+    L.handleWorkerMessage({ id: 42, state: s, level: 2, history: [L.positionKey(L.initialState()), L.positionKey(s)] }, function (m) { got.push(m); });
+    eq(got.length, 1);
+    var m = got[0];
+    eq(m.id, 42);
+    assert(isLegal(s, m.move), 'legal move');
+    assert(typeof m.stats.depth === 'number' && typeof m.stats.nodes === 'number' && typeof m.stats.ms === 'number', 'stats shape');
+    var json = JSON.parse(JSON.stringify(m));
+    eq(json.move, m.move, 'structured-clone/JSON safe');
+    return JSON.stringify(m);
+  });
+
+  test('worker: installWorkerHandler em escopo falso + mensagem invalida', function () {
+    var posted = [];
+    var scope = { postMessage: function (m) { posted.push(m); } };
+    L.installWorkerHandler(scope);
+    assert(typeof scope.onmessage === 'function', 'onmessage installed');
+    var s = L.initialState();
+    scope.onmessage({ data: { id: 'a', state: s, level: 4, history: [], timeLimitMs: 150 } });
+    scope.onmessage({ data: { id: 'b', state: null, level: 3 } });
+    scope.onmessage({ data: null });
+    eq(posted.length, 3);
+    assert(isLegal(s, posted[0].move) && posted[0].id === 'a', 'first reply');
+    eq([posted[1].id, posted[1].move], ['b', null], 'invalid state -> move null');
+    eq(posted[2].move, null, 'null data');
+  });
+
+  test('worker: workerSource() e auto-contido (avaliado num escopo isolado)', function () {
+    var src = L.workerSource();
+    var fake = { postMessage: function (m) { fake.last = m; } };
+    // evaluate the worker source with "self" = fake scope and no document/importScripts
+    var fn = new Function('self', 'importScripts', src);
+    fn(fake, function () {});
+    assert(fake.OncaLogic && typeof fake.OncaLogic.chooseMove === 'function', 'module defined in fake scope');
+    // document exists in this page, so the handler is not auto-installed here; install it explicitly
+    fake.OncaLogic.installWorkerHandler(fake);
+    fake.onmessage({ data: { id: 5, state: L.initialState(), level: 1, history: [] } });
+    assert(fake.last && fake.last.id === 5 && isLegal(L.initialState(), fake.last.move), 'reply from the isolated copy');
+    return (src.length / 1024).toFixed(1) + ' KB of source';
+  });
+
+  /* ================================================================ timing */
+  var timingPositions = (function () {
+    var p = [{ name: 'inicial', state: L.initialState() }];
+    var r = randomPositions(31337, 40, 60);
+    var mid = r.filter(function (g) { return g.state.ply >= 20 && g.state.ply <= 50 && g.state.turn === 'D'; })[0];
+    var late = randomPositions(2024, 60, 160).filter(function (g) { return g.state.captured >= 2 && g.state.turn === 'J'; })[0];
+    if (mid) p.push({ name: 'meio (ply ' + mid.state.ply + ', caes)', state: mid.state, history: mid.history });
+    if (late) p.push({ name: 'final (' + late.state.captured + ' capturas, onca)', state: late.state, history: late.history });
+    return p;
+  })();
+
+  test('tempo: niveis 3 e 4 respeitam o limite padrao (900 / 2200 ms, tolerancia 150 ms)', function () {
+    var info = [];
+    timingPositions.forEach(function (p) {
+      [3, 4].forEach(function (lv) {
+        var limit = L.DEFAULT_TIME_MS[lv];
+        var t0 = performance.now();
+        var r = L.chooseMoveWithStats(p.state, lv, { history: p.history || [] });
+        var wall = performance.now() - t0;
+        assert(isLegal(p.state, r.move), 'legal');
+        assert(wall <= limit + 150, 'level ' + lv + ' took ' + wall.toFixed(0) + ' ms on ' + p.name);
+        info.push('L' + lv + ' ' + p.name + ': ' + wall.toFixed(0) + ' ms, depth ' + r.stats.depth + ', ' + r.stats.nodes + ' nodes');
+      });
+    });
+    notes.push('- timing (default limits): ' + info.join('; '));
+    return info.length + ' searches';
+  });
+
+  test('tempo: limites personalizados (L4 100 ms, L4 400 ms, L3 250 ms, L2 300 ms)', function () {
+    var info = [];
+    [[4, 100], [4, 400], [3, 250], [2, 300]].forEach(function (c) {
+      timingPositions.forEach(function (p) {
+        var t0 = performance.now();
+        var r = L.chooseMoveWithStats(p.state, c[0], { timeLimitMs: c[1] });
+        var wall = performance.now() - t0;
+        assert(isLegal(p.state, r.move), 'legal');
+        assert(wall <= c[1] + 150, 'L' + c[0] + ' limit ' + c[1] + ' took ' + wall.toFixed(0));
+        info.push('L' + c[0] + '/' + c[1] + ': ' + wall.toFixed(0) + 'ms d' + r.stats.depth);
+      });
+    });
+    return info.join(', ');
+  });
+
+  test('niveis: nomes e tempos padrao', function () {
+    eq(L.LEVELS, [{ id: 1, name: 'Básico' }, { id: 2, name: 'Intermediário' }, { id: 3, name: 'Avançado' }, { id: 4, name: 'Expert' }]);
+    eq([L.DEFAULT_TIME_MS[1], L.DEFAULT_TIME_MS[2], L.DEFAULT_TIME_MS[3], L.DEFAULT_TIME_MS[4]], [250, 300, 900, 2200]);
+    return L.LEVELS.map(function (l) { return l.name; }).join(', ');
+  });
+
+  syncMs = performance.now() - tStart;
+  render('async tests running');
+
+  // Note: under headless --virtual-time-budget the virtual clock races ahead (>100x) while the main
+  // thread is idle, also inside the Worker. So the async tests use huge virtual timeouts and the
+  // run is bounded by the budget (use --virtual-time-budget=600000).
+  var BIG = 5000000;
+
+  /* ================================================================ async: real Worker */
+  function asyncTest(name, fn, timeoutMs) {
+    return new Promise(function (resolve) {
+      var t0 = performance.now(), done = false;
+      var timer = setTimeout(function () {
+        if (done) return; done = true;
+        nFail++; failures.push(name); lines.push('FAIL  ' + name + ': timeout ' + timeoutMs + ' ms'); resolve();
+      }, timeoutMs);
+      Promise.resolve().then(fn).then(function (info) {
+        if (done) return; done = true; clearTimeout(timer);
+        nPass++; lines.push('PASS  ' + name + (info ? '  -- ' + info : '') + '  (' + (performance.now() - t0).toFixed(0) + ' ms)'); resolve();
+      }, function (e) {
+        if (done) return; done = true; clearTimeout(timer);
+        nFail++; failures.push(name); lines.push('FAIL  ' + name + ': ' + (e && e.message)); resolve();
+      });
+    });
+  }
+
+  asyncTest('worker real: Blob Worker criado a partir de workerSource() (file://)', function () {
+    return new Promise(function (resolve, reject) {
+      var w = L.createWorker();
+      if (!w) { reject(new Error('createWorker() returned null')); return; }
+      var s = L.applyJaguarStep(L.initialState(), 16);
+      w.onmessage = function (e) {
+        var d = e.data;
+        try {
+          assert(d.id === 7, 'id echo');
+          assert(isLegal(s, d.move), 'legal move from the worker: ' + JSON.stringify(d.move));
+          assert(typeof d.stats.depth === 'number' && typeof d.stats.nodes === 'number' && typeof d.stats.ms === 'number', 'stats');
+          notes.push('- REAL Blob Worker from file:// in headless Chrome: WORKS (reply ' + JSON.stringify(d.move) + ', stats ' + JSON.stringify(d.stats) + ')');
+          w.terminate();
+          resolve('reply ' + JSON.stringify(d.move) + ' depth ' + d.stats.depth);
+        } catch (err) { reject(err); }
+      };
+      w.onerror = function (e) { reject(new Error('worker error: ' + (e.message || e))); };
+      w.postMessage({ id: 7, state: s, level: 3, history: [], timeLimitMs: 600 });
+    });
+  }, BIG).then(function () {
+    return asyncTest('chooseMoveAsync: resolve com lance legal (via Worker)', function () {
+      var s = L.initialState();
+      return L.chooseMoveAsync(s, 2, { history: [L.positionKey(s)], watchdogMs: BIG }).then(function (r) {
+        assert(isLegal(s, r.move), 'legal');
+        assert(r.worker === true, 'answer did not come from the Worker');
+        return 'worker=' + !!r.worker + ' move ' + JSON.stringify(r.move) + ' stats ' + JSON.stringify(r.stats);
+      });
+    }, BIG);
+  }).then(function () {
+    return asyncTest('chooseMoveAsync: fallback sem Worker (useWorker:false)', function () {
+      var s = L.applyJaguarStep(L.initialState(), 18);
+      return L.chooseMoveAsync(s, 3, { useWorker: false, timeLimitMs: 200 }).then(function (r) {
+        assert(isLegal(s, r.move), 'legal');
+        return 'move ' + JSON.stringify(r.move);
+      });
+    }, BIG);
+  }).then(function () {
+    finished = true;
+
+    render('done in ' + ((performance.now() - tStart) / 1000).toFixed(1) + ' s');
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prévia dos modelos 3D — Jogo da Onça</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: radial-gradient(120% 95% at 50% 42%, #4b4c44 0%, #33342e 55%, #1f201c 100%); }
+  body.flat { background: #3a3b35; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #out { position: fixed; left: 8px; bottom: 6px; margin: 0; color: #ffe9b0; font: 12px/1.35 Consolas, monospace;
+         white-space: pre-wrap; z-index: 2; pointer-events: none; text-shadow: 0 1px 2px #000; }
+  #nav { position: fixed; top: 8px; left: 8px; z-index: 3; font: 13px system-ui, sans-serif; }
+  #nav a { color: #f2d27a; margin-right: 10px; text-decoration: none; }
+  body.shot #nav, body.shot #out:empty { display: none; }
+</style>
+<script>
+  window.__log = [];
+  function __flush() { var o = document.getElementById('out'); if (o) o.textContent = window.__log.join('\n'); }
+  window.addEventListener('error', function (e) { __log.push('ERRO: ' + e.message + ' @ ' + (e.filename || '') + ':' + (e.lineno || '')); __flush(); });
+  window.addEventListener('unhandledrejection', function (e) { __log.push('REJEIÇÃO: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); __flush(); });
+</script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script src="../codigo/modelos3d.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="nav">
+  <a href="?view=iso">iso</a><a href="?view=dog">cachorro</a><a href="?view=puma">onça</a>
+  <a href="?view=pieces">peças</a><a href="?view=markers">marcadores</a><a href="?view=side">lateral</a>
+</div>
+<pre id="out"></pre>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const qs = new URLSearchParams(location.search);
+const VIEW = qs.get('view') || 'iso';
+const SHOT = qs.has('shot');
+if (SHOT) document.body.classList.add('shot');
+const log = (s) => { window.__log.push(s); window.__flush(); };
+
+try {
+const t0 = performance.now();
+const api = window.createOncaModels(THREE, qs.has("carve") ? { carve: Number(qs.get("carve")) } : undefined);
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = Number(qs.get('exp') || 1.0);
+renderer.shadowMap.enabled = !qs.has("noshadow");
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+if (!qs.has('noenv')) scene.environment = api.makeEnvironment(renderer);
+const L = api.makeLights();
+scene.add(L.group);
+
+const board = api.makeBoard({ textureSize: Number(qs.get("tex") || 3072) });
+scene.add(board.group);
+
+// ---------------- posições ----------------
+const pieces = [];
+function place(obj, i, rotY) {
+  obj.position.copy(api.pointToWorld(i));
+  if (rotY) obj.rotation.y = rotY;
+  scene.add(obj); pieces.push(obj);
+  return obj;
+}
+function startPosition() {
+  if (qs.has("nopieces")) return;
+  place(api.makePuma(), 12);
+  for (let i = 0; i < 31; i++) {
+    const [r, c] = api.POINTS[i];
+    if (r <= 2 && i !== 12) place(api.makeDog(), i);
+  }
+}
+
+// ---------------- câmera ----------------
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
+const ISO_DIR = new THREE.Vector3(1, 1, 1).normalize();   // isométrico clássico: azimute 45°, elevação 35,264°
+
+// Enquadra um conjunto de pontos (ou uma Box3) numa câmera ortográfica:
+// o conteúdo ocupa a fração "fill" da dimensão limitante da tela.
+function fitOrtho(target, dir, fill) {
+  let pts = target;
+  if (target.isBox3) {
+    pts = [];
+    for (const x of [target.min.x, target.max.x]) for (const y of [target.min.y, target.max.y]) for (const z of [target.min.z, target.max.z]) pts.push(new THREE.Vector3(x, y, z));
+  }
+  const center = new THREE.Box3().setFromPoints(pts).getCenter(new THREE.Vector3());
+  cam.position.copy(center).addScaledVector(dir, 40);
+  cam.up.set(0, 1, 0);
+  cam.lookAt(center);
+  cam.updateMatrixWorld();
+  const inv = cam.matrixWorldInverse;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    const v = p.clone().applyMatrix4(inv);
+    x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
+  }
+  const aspect = innerWidth / innerHeight;
+  const halfH = Math.max((y1 - y0) / 2, (x1 - x0) / 2 / aspect) / fill;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  cam.left = cx - halfH * aspect; cam.right = cx + halfH * aspect;
+  cam.top = cy + halfH; cam.bottom = cy - halfH;
+  cam.near = 0.1; cam.far = 200;
+  cam.updateProjectionMatrix();
+  return center;
+}
+
+let target = new THREE.Vector3();
+const pieceBox = (obj, pad = 0.04) => new THREE.Box3().setFromObject(obj).expandByScalar(pad);
+const FILL = Number(qs.get('fill') || 0.9);
+
+if (VIEW === 'iso') {
+  startPosition();
+  target = fitOrtho(board.fitPoints, ISO_DIR, FILL);
+} else if (VIEW === 'markers') {
+  // meio de partida: onça em (3,2) pode capturar (2,2) pousando em (1,2)
+  place(api.makePuma(), 17);
+  const dogs = [0, 1, 3, 4, 5, 9, 10, 12, 14, 6, 8];
+  dogs.forEach((i) => place(api.makeDog(), i));
+  // dois cachorros já capturados na bandeja
+  for (let k = 0; k < 2; k++) { const d = api.makeDog(); d.position.copy(board.captureSlots[k]); scene.add(d); }
+  const mk = (kind, i) => { const m = api.makeMarker(kind); m.position.copy(api.pointToWorld(i)); scene.add(m); return m; };
+  mk('select', 17);
+  [16, 18, 22, 21, 23, 26].forEach((i) => mk('move', i));
+  mk('capture', 7);
+  mk('victim', 12);
+  mk('hover', 13);
+  target = fitOrtho(board.fitPoints, ISO_DIR, FILL);
+} else if (VIEW === 'dog' || VIEW === 'puma') {
+  startPosition();
+  const p = VIEW === 'dog' ? pieces.find((o) => o.name === 'cachorro' && o.position.x === 0 && o.position.z === -1) : pieces[0];
+  const box = pieceBox(p, 0.02);
+  const az = Number(qs.get('az') || 30) * Math.PI / 180, el = Number(qs.get('el') || 24) * Math.PI / 180;
+  const dir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+  target = fitOrtho(box, dir, 0.86);
+} else if (VIEW === 'pieces') {
+  const d = api.makeDog(); d.position.set(-0.45, 0, 0); scene.add(d);
+  const p = api.makePuma(); p.position.set(0.45, 0, 0); scene.add(p);
+  const box = new THREE.Box3().setFromObject(d).union(new THREE.Box3().setFromObject(p));
+  const az = Number(qs.get('az') || 35) * Math.PI / 180, el = Number(qs.get('el') || 20) * Math.PI / 180;
+  const dir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+  target = fitOrtho(box.expandByScalar(0.05), dir, 0.9);
+} else if (VIEW === 'side') {
+  startPosition();
+  const d0 = api.makeDog(); d0.position.copy(board.captureSlots[0]); scene.add(d0);
+  const az = 62 * Math.PI / 180, el = 16 * Math.PI / 180;
+  const dir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+  target = fitOrtho(board.fitPoints, dir, 0.92);
+} else if (VIEW === "top") {
+  startPosition();
+  target = fitOrtho(board.fitPoints, new THREE.Vector3(0.0001, 1, 0.0001).normalize(), 0.92);
+}
+
+const controls = new OrbitControls(cam, canvas);
+controls.target.copy(target);
+controls.enableDamping = false;
+controls.update();
+// mantém o enquadramento calculado (fitOrtho já posicionou a câmera)
+controls.addEventListener('change', () => render());
+
+function render() { renderer.render(scene, cam); }
+render();
+const ms = (performance.now() - t0).toFixed(0);
+let tris = 0;
+scene.traverse((o) => { if (o.isMesh && o.geometry) { const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+document.body.dataset.ready = '1';
+if (qs.has('stats')) log(`view=${VIEW} pronto em ${ms} ms | triângulos ≈ ${Math.round(tris)} | draw calls ${renderer.info.render.calls}`);
+
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight, false); render(); });
+} catch (e) { log('ERRO: ' + (e && e.stack || e)); }
+</script>
+</body>
+</html>

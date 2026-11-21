@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jogo da Onça</title>
+<meta name="description" content="Jogo da Onça: jogo de tabuleiro tradicional de povos indígenas do Brasil, em 3D.">
+<meta name="theme-color" content="#1B1A1F">
+<!-- ARQUIVO GERADO por ferramentas/montar.ps1 a partir de codigo/. Não edite o index.html à mão. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,800&display=swap">
+<style>
+{{interface/base.css}}
+{{interface/estilo.css}}
+</style>
+<script>
+/* captura de erros: alimenta o autoteste e o relatório de testes */
+window.__errors = [];
+window.addEventListener('error', function (e) { window.__errors.push('erro: ' + e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno); });
+window.addEventListener('unhandledrejection', function (e) { window.__errors.push('promessa rejeitada: ' + ((e.reason && e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+{{interface/icones.html}}
+
+<!-- fundo: floresta amazônica (compartilhado por todas as telas) -->
+<div class="bg" aria-hidden="true">
+{{interface/floresta.html}}
+</div>
+
+<!-- ================= TELA: INÍCIO ================= -->
+<section class="tela tela-inicio" id="telaInicio" aria-labelledby="tituloInicio">
+  <div class="cartao cartao-inicio">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <div class="logo-icones" aria-hidden="true">
+        <svg class="ico ico-onca" viewBox="0 0 64 36"><use href="#ico-onca"/></svg>
+        <span class="vs">×</span>
+        <svg class="ico ico-cao" viewBox="0 0 48 36"><use href="#ico-cao"/></svg>
+      </div>
+      <h1 id="tituloInicio">Jogo da <span>Onça</span></h1>
+      <p class="sub">Uma onça contra 14 cachorros: ela caça, eles cercam.</p>
+      <div class="pilha">
+        <button type="button" class="btn btn-primario btn-grande" id="btnModoIA">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>
+          Contra o computador
+        </button>
+        <button type="button" class="btn btn-secundario btn-grande" id="btnModo2J">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><path d="M3 19c.6-3 2.6-5 5-5s4.4 2 5 5M11 19c.6-3 2.6-5 5-5s4.4 2 5 5"/></svg>
+          2 jogadores
+        </button>
+        <button type="button" class="btn btn-fantasma" data-abrir="regras">Regras</button>
+      </div>
+    </div>
+    <div class="band band-espinha" aria-hidden="true"></div>
+  </div>
+  <p class="credito">O Jogo da Onça é um jogo tradicional de povos indígenas do Brasil. Grafismos inspirados na arte indígena amazônica (padrões geométricos genéricos).</p>
+</section>
+
+<!-- ================= TELA: ESCOLHA ================= -->
+<section class="tela tela-escolha" id="telaEscolha" aria-labelledby="tituloEscolha" hidden>
+  <div class="cartao">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <!-- contra o computador -->
+      <div id="escolhaIA">
+        <h2 id="tituloEscolha">Contra o computador</h2>
+        <p class="rotulo">Você joga com:</p>
+        <div class="opcoes-lado" role="radiogroup" aria-label="Você joga com">
+          <button type="button" class="lado" role="radio" data-lado="J" aria-checked="false">
+            <svg class="ico" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg>
+            <strong>Onça</strong><small>caça e captura</small>
+          </button>
+          <button type="button" class="lado" role="radio" data-lado="D" aria-checked="true">
+            <svg class="ico" viewBox="0 0 48 36" aria-hidden="true"><use href="#ico-cao"/></svg>
+            <strong>Cachorros</strong><small>cercam a onça</small>
+          </button>
+        </div>
+        <p class="rotulo">Nível do computador:</p>
+        <div class="niveis" role="radiogroup" aria-label="Nível do computador">
+          <button type="button" class="nivel" role="radio" data-nivel="1" aria-checked="false">Básico</button>
+          <button type="button" class="nivel" role="radio" data-nivel="2" aria-checked="true">Intermediário</button>
+          <button type="button" class="nivel" role="radio" data-nivel="3" aria-checked="false">Avançado</button>
+          <button type="button" class="nivel" role="radio" data-nivel="4" aria-checked="false">Expert</button>
+        </div>
+      </div>
+      <!-- 2 jogadores -->
+      <div id="escolha2J" hidden>
+        <h2>2 jogadores</h2>
+        <p class="rotulo">Quem é a Onça?</p>
+        <div class="opcoes-lado" role="radiogroup" aria-label="Quem é a Onça">
+          <button type="button" class="lado" role="radio" data-onca="1" aria-checked="true">
+            <svg class="ico" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg>
+            <strong>Jogador 1</strong>
+          </button>
+          <button type="button" class="lado" role="radio" data-onca="2" aria-checked="false">
+            <svg class="ico" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg>
+            <strong>Jogador 2</strong>
+          </button>
+        </div>
+        <p class="nota" id="nota2J">O Jogador 2 fica com os Cachorros.</p>
+      </div>
+      <div class="pilha">
+        <button type="button" class="btn btn-primario btn-grande" id="btnComecar">Começar partida</button>
+        <button type="button" class="btn btn-fantasma" id="btnVoltar">Voltar</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TELA: PARTIDA ================= -->
+<section class="tela tela-partida" id="telaPartida" aria-label="Partida" hidden>
+  <div id="stage"></div>
+
+  <header class="hud">
+    <div class="vez" id="vez" data-lado="J">
+      <svg class="ico ico-vez-J" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg>
+      <svg class="ico ico-vez-D" viewBox="0 0 48 36" aria-hidden="true"><use href="#ico-cao"/></svg>
+      <span id="status" aria-live="polite">—</span>
+    </div>
+    <div class="placar" id="placar" role="img" aria-label="0 de 5 cachorros capturados">
+      <span class="slots" id="slots"></span>
+      <svg class="placar-ico" viewBox="0 0 48 36" aria-hidden="true"><use href="#ico-cao"/></svg>
+      <span class="placar-num"><b id="capNum">0</b>/5</span>
+    </div>
+  </header>
+
+  <button type="button" class="btn btn-atencao btn-parar" id="btnParar" hidden>Parar de capturar</button>
+
+  <nav class="barra" aria-label="Ações">
+    <button type="button" class="acao" id="btnDesfazer" disabled>
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+      <span>Desfazer</span>
+    </button>
+    <button type="button" class="acao" id="btnCamera">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      <span>Câmera</span>
+    </button>
+    <button type="button" class="acao" id="btnSom" aria-pressed="true">
+      <svg class="i i-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></svg>
+      <svg class="i i-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg>
+      <span>Som</span>
+    </button>
+    <button type="button" class="acao" id="btnMenu">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      <span>Menu</span>
+    </button>
+  </nav>
+
+  <!-- fim de partida -->
+  <div class="sobre" id="vitoria" role="dialog" aria-modal="true" aria-labelledby="vitTitulo" hidden>
+    <div class="cartao cartao-claro">
+      <div class="band band-losango" aria-hidden="true"></div>
+      <div class="cartao-corpo">
+        <svg class="ico ico-grande" id="vitIco" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg>
+        <h2 id="vitTitulo">—</h2>
+        <p id="vitSub">—</p>
+        <div class="pilha">
+          <button type="button" class="btn btn-primario btn-grande" id="btnRevanche">Revanche</button>
+          <button type="button" class="btn btn-secundario" id="btnTrocar" hidden>Trocar lados</button>
+          <button type="button" class="btn btn-fantasma" id="btnInicioVit">Início</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MENU (gaveta) ================= -->
+<div class="sobre" id="menu" role="dialog" aria-modal="true" aria-label="Menu" hidden>
+  <div class="gaveta">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo pilha">
+      <button type="button" class="btn btn-primario btn-grande" data-fechar>Continuar partida</button>
+      <button type="button" class="btn btn-secundario" id="btnReiniciar">Reiniciar partida</button>
+      <button type="button" class="btn btn-secundario" data-abrir="regras">Regras</button>
+      <button type="button" class="btn btn-fantasma" id="btnInicioMenu">Voltar ao início</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= REGRAS (gaveta) ================= -->
+<div class="sobre" id="regras" role="dialog" aria-modal="true" aria-labelledby="regrasTitulo" hidden>
+  <div class="gaveta gaveta-texto">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <h2 id="regrasTitulo">Regras</h2>
+      <ul>
+        <li>A <b>onça</b> começa no centro do tabuleiro. Os <b>14 cachorros</b> ocupam as três fileiras do lado oposto à toca (o triângulo).</li>
+        <li>A onça joga primeiro. Cada um move uma peça por vez, uma casa, seguindo as linhas.</li>
+        <li>A onça <b>captura</b> pulando por cima de um cachorro vizinho, em linha reta, até a casa vazia logo atrás. Capturar não é obrigatório, e ela pode emendar vários pulos na mesma jogada.</li>
+        <li>Os cachorros não capturam.</li>
+        <li><b>A onça vence</b> ao capturar 5 cachorros.</li>
+        <li><b>Os cachorros vencem</b> quando deixam a onça sem nenhum movimento. A toca é uma ótima armadilha!</li>
+      </ul>
+      <p class="nota">Toque numa peça sua e depois num ponto destacado. Arraste para girar o tabuleiro; use a pinça (ou a roda do mouse) para aproximar.</p>
+      <button type="button" class="btn btn-primario" data-fechar>Entendi</button>
+    </div>
+  </div>
+</div>
+
+<pre id="selftest-report" hidden></pre>
+
+<!-- módulos (scripts clássicos, definem variáveis globais) -->
+<script id="onca-logic">
+{{logica.js}}
+</script>
+<script>
+{{modelos3d.js}}
+</script>
+<script>
+{{audio.js}}
+</script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+{{app.js}}
+</script>
+</body>
+</html>

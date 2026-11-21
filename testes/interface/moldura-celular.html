@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Moldura de celular (testes)</title>
+<style>
+  /* Simula a tela de um celular: o Chrome sem janela não deixa a janela ficar
+     mais estreita que ~500px, então o jogo roda dentro de um iframe do tamanho exato. */
+  html, body { margin: 0; background: #111; }
+  iframe { display: block; border: 0; }
+</style>
+</head>
+<body>
+<script>
+  var q = new URLSearchParams(location.search);
+  var w = +(q.get('w') || 390), h = +(q.get('h') || 844);
+  var f = document.createElement('iframe');
+  f.width = w; f.height = h;
+  f.src = '../../index.html' + (q.get('q') ? '?' + q.get('q') : '');
+  document.body.appendChild(f);
+  // o autoteste do jogo (dentro do iframe) manda o relatório para cá
+  window.addEventListener('message', function (e) {
+    if (!e.data || e.data.tipo !== 'selftest') return;
+    var pre = document.createElement('pre');
+    pre.id = 'selftest-report';
+    pre.textContent = 'SELFTEST ' + (e.data.rel.ok ? 'PASSOU' : 'FALHOU') + '\n' + JSON.stringify(e.data.rel, null, 1);
+    pre.style.display = 'none';
+    document.body.appendChild(pre);
+  });
+</script>
+</body>
+</html>

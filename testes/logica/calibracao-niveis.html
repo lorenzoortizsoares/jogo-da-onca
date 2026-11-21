@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Autojogo da IA</title>
+<style>
+  :root { --bg:#fbf7ef; --ink:#1d160f; --muted:#6b5a48; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16120e; --ink:#efe6d6; --muted:#b6a48d; } }
+  body { margin: 16px; background: var(--bg); color: var(--ink); font: 13px/1.45 Consolas, "Cascadia Mono", monospace; }
+  h1 { font: 600 18px/1.2 system-ui, sans-serif; margin: 0 0 6px; }
+  p { color: var(--muted); font: 13px/1.4 system-ui, sans-serif; margin: 0 0 10px; max-width: 70ch; }
+  pre { white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<h1>Jogo da Onça — autojogo / calibração da IA</h1>
+<p>Parâmetros na URL: <code>?pairs=1-2,3-4&amp;games=8&amp;scale=0.25&amp;open=4&amp;cap=200&amp;seed=1</code>
+(ou <code>?a=3&amp;b=4</code>; <code>scale=1</code> = tempos reais; <code>log=1</code> lista os lances).
+Sem parâmetros roda uma suíte curta. No Chrome headless roda de forma síncrona (para <code>--dump-dom</code>).</p>
+<pre id="out">executando…</pre>
+<script>
+  window.__errors = [];
+  window.addEventListener('error', function (e) { window.__errors.push(e.message + ' @' + e.lineno); });
+</script>
+<script src="../../codigo/logica.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.OncaLogic;
+  var q = new URLSearchParams(location.search);
+  var headless = /HeadlessChrome/.test(navigator.userAgent) || !!navigator.webdriver;
+  var NAMES = { 1: 'Básico', 2: 'Intermediário', 3: 'Avançado', 4: 'Expert' };
+
+  var scale = q.has('scale') ? +q.get('scale') : 0.25;
+  var games = q.has('games') ? Math.max(1, +q.get('games')) : 4;
+  var openPlies = q.has('open') ? +q.get('open') : 4;
+  var plyCap = q.has('cap') ? +q.get('cap') : 200;
+  var seed = q.has('seed') ? +q.get('seed') : 1;
+  var showLog = q.get('log') === '1';
+  var pairs;
+  if (q.has('a') && q.has('b')) pairs = [[+q.get('a'), +q.get('b')]];
+  else if (q.has('pairs')) pairs = q.get('pairs').split(',').map(function (p) { return p.split('-').map(Number); });
+  else pairs = [[1, 2], [2, 3], [3, 4], [1, 4]];
+
+  var limits = {};
+  [1, 2, 3, 4].forEach(function (lv) { limits[lv] = Math.max(20, Math.round(L.DEFAULT_TIME_MS[lv] * scale)); });
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function fmtMove(m) {
+    if (!m) return '-';
+    if (m.type === 'capture') return 'x' + m.path.join('x');
+    return m.from + '-' + m.to;
+  }
+
+  // Same opening for both colour assignments of a pair of games: a few plies chosen by a very
+  // noisy shallow search (sane but varied).
+  function makeOpening(k) {
+    var ai = L.createAI({ params: { 2: { noise: 160 } } }), rng = mulberry32(seed * 7919 + k * 104729 + 13);
+    var s = L.initialState(), moves = [];
+    for (var i = 0; i < openPlies && !L.winner(s); i++) {
+      var m = ai.chooseMove(s, 2, { rng: rng, timeLimitMs: 100 });
+      if (!m) break;
+      moves.push(m);
+      s = L.applyMove(s, m);
+    }
+    return moves;
+  }
+
+  // ---------- one game (step-wise so it can run sync or async) ----------
+  function newGame(cfg) {
+    // cfg: {jLevel, dLevel, jAI, dAI, opening, rngJ, rngD}
+    var g = { cfg: cfg, s: L.initialState(), hist: [], log: [], winner: null, done: false, error: null,
+              depth: { J: 0, D: 0 }, nMoves: { J: 0, D: 0 }, ms: { J: 0, D: 0 }, maxMs: { J: 0, D: 0 } };
+    g.hist.push(L.positionKey(g.s));
+    cfg.opening.forEach(function (m) { g.s = L.applyMove(g.s, m); g.hist.push(L.positionKey(g.s)); g.log.push(fmtMove(m) + '*'); });
+    return g;
+  }
+  function stepGame(g) {
+    if (g.done) return true;
+    var w = L.winner(g.s);
+    if (w) { g.winner = w; g.done = true; return true; }
+    if (g.s.ply >= plyCap) { g.winner = null; g.done = true; return true; }
+    var side = g.s.turn, lv = side === 'J' ? g.cfg.jLevel : g.cfg.dLevel, ai = side === 'J' ? g.cfg.jAI : g.cfg.dAI;
+    var t0 = performance.now();
+    var r = ai.chooseMoveWithStats(g.s, lv, { timeLimitMs: limits[lv], history: g.hist, rng: side === 'J' ? g.cfg.rngJ : g.cfg.rngD });
+    var dt = performance.now() - t0;
+    g.ms[side] += dt; g.maxMs[side] = Math.max(g.maxMs[side], dt);
+    g.depth[side] += r.stats.depth; g.nMoves[side]++;
+    if (!r.move) { g.error = 'null move for ' + side + ' at ply ' + g.s.ply; g.done = true; return true; }
+    try { g.s = L.applyMove(g.s, r.move); }
+    catch (e) { g.error = 'ILLEGAL ' + JSON.stringify(r.move) + ': ' + e.message; g.done = true; return true; }
+    g.hist.push(L.positionKey(g.s));
+    if (showLog) g.log.push(fmtMove(r.move));
+    return false;
+  }
+
+  // ---------- matches ----------
+  var results = [];   // per game records
+  var plan = [];
+  pairs.forEach(function (p, pi) {
+    var a = p[0], b = p[1];
+    var aiA = L.createAI(), aiB = L.createAI();
+    for (var k = 0; k < games; k++) {
+      var opening = (k % 2 === 0) ? makeOpening(pi * 1000 + (k >> 1)) : plan[plan.length - 1].opening;
+      var aIsJ = k % 2 === 0;
+      plan.push({ a: a, b: b, k: k, aIsJ: aIsJ, opening: opening, aiA: aiA, aiB: aiB,
+                  rngA: mulberry32(seed * 31 + pi * 977 + k * 7 + 1), rngB: mulberry32(seed * 37 + pi * 983 + k * 11 + 2) });
+    }
+  });
+
+  var out = document.getElementById('out');
+  var tStart = performance.now();
+
+  function summarize(final) {
+    var lines = [];
+    lines.push('Autojogo: escala de tempo ' + scale + ' (limites: ' + [1, 2, 3, 4].map(function (lv) { return NAMES[lv] + ' ' + limits[lv] + ' ms'; }).join(', ') +
+               '), limite de ' + plyCap + ' plies = empate, abertura: ' + openPlies + ' plies aleatórias (iguais nas duas cores), seed ' + seed);
+    lines.push('jogos concluídos: ' + results.length + '/' + plan.length + (final ? '' : ' (em andamento)') + ', tempo ' + ((performance.now() - tStart) / 1000).toFixed(0) + ' s');
+    lines.push('');
+    lines.push(pad('Partida', 30) + pad('A vence (J/D)', 16) + pad('empates', 9) + pad('B vence (J/D)', 16) + pad('pontos A', 10) + pad('plies méd.', 11) + 'prof. méd. A/B');
+    var byPair = {};
+    results.forEach(function (r) {
+      var key = r.a + '-' + r.b;
+      var e = byPair[key] || (byPair[key] = { a: r.a, b: r.b, aW: 0, aWJ: 0, aWD: 0, bW: 0, bWJ: 0, bWD: 0, d: 0, n: 0, plies: 0, depA: 0, depB: 0, nA: 0, nB: 0 });
+      e.n++; e.plies += r.plies;
+      if (r.winnerSide === null) e.d++;
+      else if (r.winnerPlayer === 'A') { e.aW++; if (r.winnerSide === 'J') e.aWJ++; else e.aWD++; }
+      else { e.bW++; if (r.winnerSide === 'J') e.bWJ++; else e.bWD++; }
+      e.depA += r.depA; e.nA += r.nA; e.depB += r.depB; e.nB += r.nB;
+    });
+    var levelPts = {}, levelGames = {};
+    Object.keys(byPair).forEach(function (k) {
+      var e = byPair[k];
+      var pts = e.aW + 0.5 * e.d;
+      lines.push(pad(NAMES[e.a] + ' vs ' + NAMES[e.b], 30) + pad(e.aW + ' (' + e.aWJ + '/' + e.aWD + ')', 16) + pad(String(e.d), 9) +
+                 pad(e.bW + ' (' + e.bWJ + '/' + e.bWD + ')', 16) + pad(pts + '/' + e.n, 10) + pad((e.plies / e.n).toFixed(0), 11) +
+                 (e.depA / Math.max(1, e.nA)).toFixed(1) + '/' + (e.depB / Math.max(1, e.nB)).toFixed(1));
+      levelPts[e.a] = (levelPts[e.a] || 0) + pts; levelGames[e.a] = (levelGames[e.a] || 0) + e.n;
+      levelPts[e.b] = (levelPts[e.b] || 0) + (e.bW + 0.5 * e.d); levelGames[e.b] = (levelGames[e.b] || 0) + e.n;
+    });
+    lines.push('');
+    lines.push('Pontuação por nível (vitória 1, empate 0,5): ' + Object.keys(levelPts).map(function (lv) {
+      return NAMES[lv] + ' ' + levelPts[lv] + '/' + levelGames[lv] + ' (' + Math.round(100 * levelPts[lv] / levelGames[lv]) + '%)';
+    }).join(', '));
+    var jw = 0, dw = 0, dr = 0;
+    results.forEach(function (r) { if (r.winnerSide === 'J') jw++; else if (r.winnerSide === 'D') dw++; else dr++; });
+    lines.push('Lado vencedor: onça ' + jw + ', cães ' + dw + ', empates ' + dr);
+    var maxJ = 0;
+    results.forEach(function (r) { maxJ = Math.max(maxJ, r.maxMs); });
+    lines.push('Maior tempo de um lance: ' + maxJ.toFixed(0) + ' ms');
+    var errs = results.filter(function (r) { return r.error; });
+    lines.push('Erros: ' + (errs.length ? errs.map(function (r) { return r.error; }).join(' | ') : 'nenhum') +
+               (window.__errors.length ? ' | page: ' + window.__errors.join(' | ') : ''));
+    lines.push('');
+    lines.push('Jogos:');
+    results.forEach(function (r, i) {
+      lines.push('  #' + (i + 1) + ' ' + NAMES[r.a] + (r.aIsJ ? '(onça)' : '(cães)') + ' x ' + NAMES[r.b] + (r.aIsJ ? '(cães)' : '(onça)') +
+                 ': ' + (r.winnerSide === 'J' ? 'onça vence' : r.winnerSide === 'D' ? 'cães vencem' : 'empate') +
+                 ' em ' + r.plies + ' plies, capturas ' + r.captured + ', abertura ' + r.opening + (r.log ? '\n     ' + r.log : ''));
+    });
+    lines.push('');
+    lines.push('JSON ' + JSON.stringify(results.map(function (r) {
+      return { a: r.a, b: r.b, aIsJ: r.aIsJ, w: r.winnerSide, p: r.plies, c: r.captured, dA: +(r.depA / Math.max(1, r.nA)).toFixed(2), dB: +(r.depB / Math.max(1, r.nB)).toFixed(2), mx: Math.round(r.maxMs), e: r.error || undefined };
+    })));
+    out.textContent = lines.join('\n');
+  }
+  function pad(s, n) { s = String(s); while (s.length < n) s += ' '; return s; }
+
+  function finishGame(p, g) {
+    var winnerSide = g.error ? (g.s.turn === 'J' ? 'D' : 'J') : g.winner;
+    var aSide = p.aIsJ ? 'J' : 'D';
+    results.push({
+      a: p.a, b: p.b, aIsJ: p.aIsJ, winnerSide: winnerSide,
+      winnerPlayer: winnerSide === null ? null : (winnerSide === aSide ? 'A' : 'B'),
+      plies: g.s.ply, captured: g.s.captured, error: g.error,
+      depA: g.depth[aSide], nA: g.nMoves[aSide], depB: g.depth[aSide === 'J' ? 'D' : 'J'], nB: g.nMoves[aSide === 'J' ? 'D' : 'J'],
+      maxMs: Math.max(g.maxMs.J, g.maxMs.D), opening: p.opening.map(fmtMove).join(' '), log: showLog ? g.log.join(' ') : ''
+    });
+  }
+  function gameFor(p) {
+    return newGame({
+      jLevel: p.aIsJ ? p.a : p.b, dLevel: p.aIsJ ? p.b : p.a,
+      jAI: p.aIsJ ? p.aiA : p.aiB, dAI: p.aIsJ ? p.aiB : p.aiA,
+      rngJ: p.aIsJ ? p.rngA : p.rngB, rngD: p.aIsJ ? p.rngB : p.rngA,
+      opening: p.opening
+    });
+  }
+
+  if (headless) {
+    plan.forEach(function (p) {
+      var g = gameFor(p);
+      while (!stepGame(g)) { /* play */ }
+      finishGame(p, g);
+    });
+    summarize(true);
+  } else {
+    var gi = 0, cur = null;
+    (function tick() {
+      if (gi >= plan.length) { summarize(true); return; }
+      if (!cur) cur = gameFor(plan[gi]);
+      if (stepGame(cur)) { finishGame(plan[gi], cur); cur = null; gi++; summarize(false); }
+      setTimeout(tick, 0);
+    })();
+  }
+})();
+</script>
+</body>
+</html>
