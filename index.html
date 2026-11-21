@@ -6,6 +6,9 @@
 <title>Jogo da Onça</title>
 <meta name="description" content="Jogo da Onça: jogo de tabuleiro tradicional de povos indígenas do Brasil, em 3D.">
 <meta name="theme-color" content="#1B1A1F">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTMiIGZpbGw9IiMxQjFBMUYiLz4KICA8cGF0aCBkPSJNNSA1N2g1NCIgc3Ryb2tlPSIjQjgzODFFIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1kYXNoYXJyYXk9IjQgMyIvPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xIDExKSIgZmlsbD0iI0U5NjYzQSIgY29sb3I9IiNFOTY2M0EiPgogICAgPHBhdGggZD0iTTE0LjQgMTUuMkMxOSAxMy4yIDI2IDEzLjQgMzEgMTMuMiAzNS42IDEzIDM4LjggMTEuNCA0Mi42IDExIDQ0LjggMTAuOCA0Ni40IDExLjIgNDcuNiAxMS42IDQ4LjYgMTAgNTAuMiA4LjYgNTIuNCA4LjIgNTIuMiA2LjggNTMuMiA1LjkgNTQuMyA2IDU1LjMgNi4xIDU1LjkgNi45IDU1LjggNy43IDU3IDcuNyA1OC4xIDguMSA1OSA4LjggNTkuOCA5LjYgNjAuNCAxMC42IDYwLjYgMTEuNiA2MC44IDEyLjYgNjAuMiAxMy40IDU5LjIgMTMuNiA1OCAxNCA1Ni42IDE0LjIgNTUuNCAxNC40IDUzLjYgMTQuOCA1Mi40IDE1LjggNTEuMiAxNyA1MC4yIDE4IDQ5LjQgMTkgNDkuMiAyMC40IDQ5LjQgMjQgNDkuOCAyOCA1MC4yIDMxLjJMNTAuNiAzMy42SDQ3LjJMNDYuNiAzMC42QzQ2IDI3LjYgNDUuNCAyNSA0NC42IDIyLjggMzggMjMuNiAzMCAyMy42IDI0LjggMjMuNCAyNC42IDI1LjQgMjQuMiAyNy40IDIzLjQgMjkuMkwyMy44IDMzLjZIMjAuNkwyMC4yIDMwLjRDMTkuNiAyOC40IDE4LjQgMjcgMTYuOCAyNS42IDE0LjYgMjMuNiAxMy4yIDIxLjQgMTMuMiAxOC42IDEzLjIgMTcuMiAxMy42IDE2IDE0LjQgMTUuMloiLz4KICAgIDxwYXRoIGQ9Ik00MyAyMUM0My40IDI0LjYgNDQgMjggNDQuMiAzMUw0NC40IDMzLjZINDEuNEw0MSAzMC44QzQwLjYgMjggNDAuMiAyNC40IDQwIDIxWiIvPgogICAgPHBhdGggZD0iTTE4LjQgMjEuNkMxOC4yIDI0LjQgMTcuNiAyNyAxNyAyOS40TDE2LjYgMzMuNkgxOS42TDIwLjIgMjkuNkMyMC44IDI3IDIxLjQgMjQuNCAyMS42IDIxLjZaIi8+CiAgICA8cGF0aCBkPSJNMTQuNiAxNkM4LjYgMTYuNCA1IDIwLjQgNSAyNS42IDUgMjkuNiA3IDMxLjggOS44IDMxLjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjMuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPC9nPgogIDxwYXRoIGQ9Ik01MC44IDIwQzUwLjYgMTguOCA1MS40IDE4IDUyLjMgMTguMSA1MyAxOC4yIDUzLjMgMTguOCA1My4yIDE5LjRaIiBmaWxsPSIjMUIxQTFGIi8+Cjwvc3ZnPgo=">
+<link rel="icon" type="image/png" sizes="180x180" href="data:image/png;base64,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">
+<link rel="apple-touch-icon" href="data:image/png;base64,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">
 <!-- ARQUIVO GERADO por ferramentas/montar.ps1 a partir de codigo/. Não edite o index.html à mão. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -315,8 +318,40 @@ h2 { font-size: 26px; color: var(--palha-hi); margin-bottom: 6px; }
 /* indicador de conexão na faixa da vez */
 .vez[data-rede="off"] { border-color: #C9534A; }
 .vez[data-rede="off"]::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: #E2574C; flex: none; }
+/* chat: caixinha no canto inferior esquerdo (sempre visível no online) */
+.minichat {
+  position: absolute; z-index: 3; left: 10px; bottom: calc(84px + env(safe-area-inset-bottom));
+  width: min(62vw, 300px); padding: 8px 10px; border-radius: 12px; cursor: pointer;
+  background: rgba(13, 14, 16, .62); border: 1px solid var(--line); color: var(--palha-hi);
+  font-size: 13px; line-height: 1.3; -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+}
+.minichat:focus-visible { outline: 3px solid var(--ouro); outline-offset: 2px; }
+.minichat .msg { margin: 0 0 3px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.minichat-dica { margin: 0; color: var(--palha-dim); font-size: 12px; }
+.minichat-lista:not(:empty) + .minichat-dica { display: none; }
+.msg b { color: var(--palha-2); font-weight: 800; }
+.msg.meu b { color: var(--uru-text); }
+/* chat completo */
+.gaveta-chat { display: flex; flex-direction: column; max-height: min(86vh, 640px); }
+.gaveta-chat .cartao-corpo { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.chat-topo { display: flex; justify-content: space-between; align-items: center; }
+.btn-fechar { min-height: 44px; padding: 6px 12px; }
+.chat-aviso { margin-top: 2px; font-size: 13px; }
+.chat-lista { flex: 1; min-height: 160px; overflow-y: auto; margin: 10px 0; padding: 8px; border-radius: 12px; background: rgba(0, 0, 0, .25); border: 1px solid var(--line); }
+.chat-lista .msg { margin: 0 0 8px; overflow-wrap: anywhere; }
+.chat-envio { display: flex; gap: 8px; }
+.chat-envio input {
+  flex: 1; min-width: 0; min-height: 48px; padding: 8px 12px; border-radius: 12px;
+  border: 2px solid var(--line-2); background: rgba(0, 0, 0, .25); color: var(--palha-hi); font-size: 16px;
+}
+.chat-envio input:focus { outline: 3px solid var(--ouro); outline-offset: 2px; border-color: transparent; }
+/* no celular, "Parar de capturar" vai para a direita para não cobrir o chat */
+@media (max-width: 699px) {
+  .tela-partida.online .btn-parar { left: auto; right: 10px; transform: none; }
+  .tela-partida.online .btn-parar:active { transform: scale(.98); }
+}
 .toast {
-  position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); bottom: calc(96px + env(safe-area-inset-bottom));
+  position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); top: calc(64px + env(safe-area-inset-top));
   max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 12px;
   background: var(--palha-hi); color: var(--jen); font-weight: 700; box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
 }
@@ -583,6 +618,12 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
 
   <button type="button" class="btn btn-atencao btn-parar" id="btnParar" hidden>Parar de capturar</button>
 
+  <!-- chat online: caixinha sempre visível (últimas 4 mensagens); tocar abre o chat completo -->
+  <div class="minichat" id="miniChat" role="button" tabindex="0" aria-label="Chat: toque para abrir" hidden>
+    <div class="minichat-lista" id="miniLista" aria-live="polite"></div>
+    <p class="minichat-dica" id="miniDica">Toque para conversar</p>
+  </div>
+
   <nav class="barra" aria-label="Ações">
     <button type="button" class="acao" id="btnDesfazer" disabled>
       <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
@@ -649,7 +690,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         <li><b>A onça vence</b> ao capturar 5 cachorros.</li>
         <li><b>Os cachorros vencem</b> quando deixam a onça sem nenhum movimento. A toca é uma ótima armadilha!</li>
       </ul>
-      <p class="nota">Toque numa peça sua e depois num ponto destacado. Arraste para girar o tabuleiro; use a pinça (ou a roda do mouse) para aproximar.</p>
+      <p class="nota">Toque numa peça sua e depois num ponto destacado. O botão Câmera troca a visão: normal, do lado oposto e de cima.</p>
       <button type="button" class="btn btn-primario" data-fechar>Entendi</button>
     </div>
   </div>
@@ -666,6 +707,26 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         <button type="button" class="btn btn-primario btn-grande" id="avisoSim">OK</button>
         <button type="button" class="btn btn-secundario" id="avisoNao">Cancelar</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= CHAT COMPLETO ================= -->
+<div class="sobre" id="chat" role="dialog" aria-modal="true" aria-labelledby="chatTitulo" hidden>
+  <div class="gaveta gaveta-chat">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <div class="chat-topo">
+        <h2 id="chatTitulo">Chat</h2>
+        <button type="button" class="btn btn-fantasma btn-fechar" data-fechar aria-label="Fechar o chat">Fechar</button>
+      </div>
+      <p class="nota chat-aviso">Mensagens criptografadas de ponta a ponta e apagadas quando vocês saem da sala. Não mande senhas nem dados pessoais.</p>
+      <div class="chat-lista" id="chatLista" role="log" aria-live="polite"></div>
+      <form class="chat-envio" id="chatForm" autocomplete="off">
+        <input id="chatTexto" type="text" maxlength="200" enterkeyhint="send" placeholder="Escreva uma mensagem…" aria-label="Mensagem">
+        <button type="submit" class="btn btn-primario" id="chatEnviar">Enviar</button>
+      </form>
+      <p class="nota erro" id="chatErro" hidden></p>
     </div>
   </div>
 </div>
@@ -3474,6 +3535,27 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
   var ALFABETO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // sem 0/O, 1/I/L (evita confusão ao digitar)
   var SERVIDORES = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
   var MQTT_JS = 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';
+  // privacidade: nada fica guardado para sempre no servidor
+  var EXPIRA_RETIDO_SEG = 6 * 3600;   // dados da sala somem sozinhos em 6 h (mesmo se ninguém "sair" direito)
+  var EXPIRA_MSG_SEG = 120;           // mensagens de passagem (lances avisos, chat) nunca ficam guardadas
+  var LIMITE_CHAT = 200;              // caracteres por mensagem
+  var INFO_CHAT = 'jogo-da-onca/chat/v1';
+
+  // ---------------------------------------------------------------- utilidades de criptografia
+  function criptoDisponivel() { return !!(root.crypto && root.crypto.subtle && root.crypto.getRandomValues); }
+  function paraB64(bytes) { var s = ''; var u = new Uint8Array(bytes); for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); }
+  function deB64(txt) { var s = atob(txt); var u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+  function utf8(txt) { return new TextEncoder().encode(txt); }
+  // REG-008: não usar caracteres invisíveis (U+2028/U+2029) dentro de expressões regulares no código:
+  // eles contam como quebra de linha e derrubavam o módulo inteiro. Filtra por código numérico.
+  function limparTexto(txt) {
+    var s = String(txt == null ? '' : txt), out = '';
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      out += (c < 32 || c === 127 || c === 0x2028 || c === 0x2029) ? ' ' : s.charAt(i);
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  }
 
   function gerarCodigo(rng) {
     rng = rng || Math.random;
@@ -3524,8 +3606,9 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
             var will = opcoes && opcoes.will;
             cli = mqtt.connect(url, {
               clientId: id + '-' + Math.random().toString(36).slice(2, 7),
+              protocolVersion: 5,          // MQTT 5: permite validade (expiração) nas mensagens guardadas
               clean: true, keepalive: 20, connectTimeout: 7000, reconnectPeriod: 2500, resubscribe: true,
-              will: will ? { topic: will.topico, payload: JSON.stringify(will.dados), qos: 1, retain: false } : undefined
+              will: will ? { topic: will.topico, payload: JSON.stringify(will.dados), qos: 1, retain: false, properties: { messageExpiryInterval: EXPIRA_MSG_SEG } } : undefined
             });
             cli.on('connect', function () { aoEst(true); if (!feito) { feito = true; resolve(); } });
             cli.on('offline', function () { aoEst(false); });
@@ -3541,7 +3624,11 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           });
         });
       },
-      publicar: function (t, obj, o) { if (cli) cli.publish(t, obj == null ? '' : JSON.stringify(obj), { qos: 1, retain: !!(o && o.reter) }); },
+      publicar: function (t, obj, o) {
+        if (!cli) return;
+        var props = o && o.expiraSeg ? { messageExpiryInterval: o.expiraSeg } : undefined;
+        cli.publish(t, obj == null ? '' : JSON.stringify(obj), { qos: 1, retain: !!(o && o.reter), properties: props });
+      },
       assinar: function (filtro) { if (cli) cli.subscribe(filtro, { qos: 1 }); },
       aoMensagem: function (cb) { aoMsg = cb; },
       aoConexao: function (cb) { aoEst = cb; },
@@ -3560,7 +3647,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
     return f.length === t.length;
   }
   function criarBrokerMemoria() {
-    var retidos = {}, clientes = [];
+    var retidos = {}, clientes = [], publicacoes = [];   // publicacoes: tudo o que passou pelo "servidor" (para os testes de privacidade)
     var depois = function (fn) { setTimeout(fn, 0); };
     function entregar(topico, msg) {
       clientes.forEach(function (c) {
@@ -3573,6 +3660,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
     }
     return {
       retidos: retidos,
+      publicacoes: publicacoes,
       criarTransporte: function () {
         var c = { ligado: false, filtros: [], will: null, aoMsg: function () {}, aoEst: function () {} };
         clientes.push(c);
@@ -3581,6 +3669,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           conectar: function (id, opcoes) { c.will = opcoes && opcoes.will; c.ligado = true; depois(function () { c.aoEst(true); }); return Promise.resolve(); },
           publicar: function (t, obj, o) {
             var msg = copia(obj);
+            publicacoes.push({ topico: t, msg: copia(msg), opcoes: copia(o || {}) });
             if (o && o.reter) { if (msg == null) delete retidos[t]; else retidos[t] = msg; }
             if (msg != null) entregar(t, msg);
           },
@@ -3606,12 +3695,68 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
     var s = {
       id: o.id || gerarId(), codigo: null, servidor: 0, transporte: null,
       info: null, estado: null, conectado: false, adversarioOnline: false, ultimaBatida: 0,
-      relogios: [], encerrada: false
+      relogios: [], encerrada: false,
+      // chat criptografado de ponta a ponta (ECDH P-256 -> HKDF-SHA256 -> AES-GCM 256)
+      par: null, minhaPub: null, pubAdv: null, chaveChat: null, contChat: 0, ultimoN: -1,
+      chatRejeitadas: 0, filaChat: Promise.resolve(), geracaoChave: 0
     };
     function emitir(nome, dado) { (eventos[nome] || []).slice().forEach(function (cb) { cb(dado); }); }
     function base() { return PREFIXO + s.codigo + '/'; }
     function agora() { return Date.now(); }
-    function publicar(sufixo, dados, reter) { if (s.transporte) s.transporte.publicar(base() + sufixo, dados, { reter: !!reter }); }
+    // retidos (sala, estado, chaves) expiram sozinhos; o resto é só "de passagem"
+    function publicar(sufixo, dados, reter) {
+      if (s.transporte) s.transporte.publicar(base() + sufixo, dados, { reter: !!reter, expiraSeg: reter ? EXPIRA_RETIDO_SEG : EXPIRA_MSG_SEG });
+    }
+
+    // ---- chaves do chat: cada aparelho gera um par só seu; a chave secreta nunca passa pelo servidor
+    function prepararChave() {
+      if (s.par || !criptoDisponivel() || !papel()) return;
+      var subtle = root.crypto.subtle;
+      s.par = subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']).then(function (par) {
+        return subtle.exportKey('raw', par.publicKey).then(function (raw) {
+          if (s.encerrada) return par;
+          s.minhaPub = paraB64(raw);
+          publicar('chave/' + s.id, { id: s.id, pub: s.minhaPub }, true);
+          derivar();
+          return par;
+        });
+      });
+    }
+    function derivar() {
+      if (!s.par || !s.pubAdv || !s.minhaPub) return;
+      var subtle = root.crypto.subtle, pubAdv = s.pubAdv, geracao = ++s.geracaoChave;
+      var ids = [s.id, idAdversario()].sort().join('|');
+      s.par.then(function (par) {
+        return subtle.importKey('raw', deB64(pubAdv), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+          .then(function (pub) { return subtle.deriveBits({ name: 'ECDH', public: pub }, par.privateKey, 256); })
+          .then(function (bits) { return subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']); })
+          .then(function (hk) {
+            return subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: utf8(s.codigo), info: utf8(INFO_CHAT + '|' + ids) },
+              hk, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+          });
+      }).then(function (chave) {
+        if (geracao !== s.geracaoChave || s.encerrada) return;
+        s.chaveChat = chave; s.ultimoN = -1;
+        emitir('chat-pronto', true);
+      }, function () { s.chaveChat = null; });
+    }
+    function decifrarChat(msg) {
+      var chave = s.chaveChat;
+      if (!chave) { s.chatRejeitadas++; return Promise.resolve(); }
+      var iv, ct;
+      try { iv = deB64(msg.iv); ct = deB64(msg.ct); } catch (e) { s.chatRejeitadas++; return Promise.resolve(); }
+      if (iv.length !== 12 || ct.length < 17 || ct.length > 2048) { s.chatRejeitadas++; return Promise.resolve(); }
+      return root.crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv, additionalData: utf8(s.codigo + '|' + msg.id) }, chave, ct)
+        .then(function (claro) {
+          var d = JSON.parse(new TextDecoder().decode(claro));
+          var texto = limparTexto(d && d.t);
+          // contador crescente: mensagem repetida (replay) ou fora de ordem é descartada
+          if (!texto || texto.length > LIMITE_CHAT || typeof d.n !== 'number' || !(d.n > s.ultimoN) || chave !== s.chaveChat) { s.chatRejeitadas++; return; }
+          s.ultimoN = d.n;
+          emitir('chat', { meu: false, lado: oposto(meuLado()), texto: texto, ts: Date.now() });
+        })
+        .catch(function () { s.chatRejeitadas++; });   // adulterada, chave errada ou lixo
+    }
 
     function meuLado() {
       if (!s.info || !s.info.criador) return null;
@@ -3642,6 +3787,10 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         // REG-006: acabei de descobrir quem é o adversário -> bato na hora (senão ele me
         // veria como "desconectado" até a próxima batida periódica)
         if (!advAntes && idAdversario()) bater();
+        prepararChave();
+        if (s.chavesRecebidas && idAdversario() && s.chavesRecebidas[idAdversario()] && s.pubAdv !== s.chavesRecebidas[idAdversario()]) {
+          s.pubAdv = s.chavesRecebidas[idAdversario()]; derivar();
+        }
         emitir('sala', msg);
         // o estado pode ter chegado antes da sala: processa agora
         if (s.estadoPendente) { var p = s.estadoPendente; s.estadoPendente = null; receber(base() + 'estado', p); }
@@ -3658,6 +3807,19 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         return;
       }
       if (resto === 'pedido') { if (msg.id !== s.id) tratarPedido(msg); return; }
+      if (resto.indexOf('chave/') === 0) {
+        // chave pública de um jogador (retida): guardo por id e derivo quando for a do adversário
+        if (typeof msg.id !== 'string' || typeof msg.pub !== 'string' || msg.pub.length > 200 || msg.id === s.id || resto !== 'chave/' + msg.id) return;
+        s.chavesRecebidas = s.chavesRecebidas || {};
+        s.chavesRecebidas[msg.id] = msg.pub;
+        if (msg.id === idAdversario() && msg.pub !== s.pubAdv) { s.pubAdv = msg.pub; s.chaveChat = null; derivar(); }
+        return;
+      }
+      if (resto === 'chat') {
+        if (msg.id === s.id || msg.id !== idAdversario() || typeof msg.iv !== 'string' || typeof msg.ct !== 'string') return;
+        s.filaChat = s.filaChat.then(function () { return decifrarChat(msg); });   // decifra na ordem de chegada
+        return;
+      }
       if (resto.indexOf('presenca/') === 0) {
         if (msg.id === s.id || msg.id !== idAdversario()) return;
         s.batidasRecebidas = (s.batidasRecebidas || 0) + 1;
@@ -3683,6 +3845,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           publicar('estado', { partida: 1, seq: 0, estado: o.initialState(), lance: null, autor: s.id }, true);
           marcarPresenca(p.id);   // REG-006: o pedido de entrada já prova que ele está online
           bater();                // e ele recebe a minha batida logo depois da sala
+          if (s.chavesRecebidas && s.chavesRecebidas[p.id]) { s.pubAdv = s.chavesRecebidas[p.id]; derivar(); }
         } else if (!s.info.convidado || s.info.convidado.id !== p.id) {
           publicar('pedido', { tipo: 'cheia', id: s.id, para: p.id });
         }
@@ -3751,7 +3914,27 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       get adversarioOnline() { return s.adversarioOnline; },
       get meuLado() { return meuLado(); },
       get papel() { return papel(); },
+      get chatPronto() { return !!s.chaveChat; },
+      get chatDisponivel() { return criptoDisponivel(); },
       on: function (nome, cb) { (eventos[nome] = eventos[nome] || []).push(cb); return api; },
+
+      // chat: só sai do aparelho criptografado (AES-GCM com a chave combinada pelos dois)
+      enviarChat: function (txt) {
+        var texto = limparTexto(txt);
+        if (!texto) return Promise.resolve({ ok: false, motivo: 'vazio' });
+        if (texto.length > LIMITE_CHAT) return Promise.resolve({ ok: false, motivo: 'longo' });
+        if (!criptoDisponivel()) return Promise.resolve({ ok: false, motivo: 'sem-cripto' });
+        if (!s.chaveChat || !idAdversario()) return Promise.resolve({ ok: false, motivo: 'chave' });
+        var chave = s.chaveChat, n = ++s.contChat;
+        var iv = root.crypto.getRandomValues(new Uint8Array(12));
+        var claro = utf8(JSON.stringify({ t: texto, n: n }));
+        return root.crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv, additionalData: utf8(s.codigo + '|' + s.id) }, chave, claro)
+          .then(function (ct) {
+            publicar('chat', { id: s.id, iv: paraB64(iv), ct: paraB64(ct) }, false);
+            emitir('chat', { meu: true, lado: meuLado(), texto: texto, ts: Date.now() });
+            return { ok: true };
+          }, function () { return { ok: false, motivo: 'erro' }; });
+      },
 
       // cria uma sala nova; quem cria escolhe o lado
       criar: function (lado, codigo) {
@@ -3760,6 +3943,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           s.info = { v: 1, criador: { id: s.id, lado: lado === 'J' ? 'J' : 'D' }, convidado: null, status: 'aguardando', servidor: s.servidor, t: agora() };
           publicar('sala', s.info, true);
           publicar('estado', null, true);   // limpa partida antiga com o mesmo código (improvável)
+          prepararChave();
           return { codigo: s.codigo };
         });
       },
@@ -3827,27 +4011,38 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       },
       sair: function () {
         if (!s.transporte) return;
+        var jogador = !!papel(), adv = idAdversario();
         publicar('pedido', { tipo: 'sair', id: s.id });
         publicar('presenca/' + s.id, { id: s.id, online: false });
-        if (papel() === 'criador' && s.info && s.info.status === 'aguardando') publicar('sala', null, true);
+        if (jogador) {
+          // privacidade: a sala acabou -> apaga tudo o que ficou guardado no servidor
+          publicar('sala', null, true);
+          publicar('estado', null, true);
+          publicar('chave/' + s.id, null, true);
+          if (adv) publicar('chave/' + adv, null, true);
+        }
         api.fechar();
       },
       fechar: function () {
         s.encerrada = true;
         pararBatidas();
+        // apaga os segredos do chat da memória
+        s.par = null; s.chaveChat = null; s.minhaPub = null; s.pubAdv = null; s.chavesRecebidas = null;
         var tr = s.transporte; s.transporte = null;
         if (tr) setTimeout(function () { tr.desconectar(); }, 150);
       },
       _transporte: function () { return s.transporte; },  // testes
-      _diag: function () { return { ultimaBatida: s.ultimaBatida, agora: agora(), idAdversario: idAdversario(), batidasRecebidas: s.batidasRecebidas || 0, batidasEnviadas: s.batidasEnviadas || 0, relogios: s.relogios.length, codigo: s.codigo, temTransporte: !!s.transporte }; }
+      _diag: function () { return { ultimaBatida: s.ultimaBatida, agora: agora(), idAdversario: idAdversario(), batidasRecebidas: s.batidasRecebidas || 0, batidasEnviadas: s.batidasEnviadas || 0, relogios: s.relogios.length, codigo: s.codigo, temTransporte: !!s.transporte, chatPronto: !!s.chaveChat, chatRejeitadas: s.chatRejeitadas }; }
     };
     return api;
   }
 
   var OncaOnline = {
     PREFIXO: PREFIXO, ALFABETO: ALFABETO, SERVIDORES: SERVIDORES,
+    EXPIRA_RETIDO_SEG: EXPIRA_RETIDO_SEG, EXPIRA_MSG_SEG: EXPIRA_MSG_SEG, LIMITE_CHAT: LIMITE_CHAT,
     gerarCodigo: gerarCodigo, gerarId: gerarId, normalizarCodigo: normalizarCodigo, codigoValido: codigoValido,
-    formatarCodigo: formatarCodigo, oposto: oposto, casaTopico: casaTopico,
+    formatarCodigo: formatarCodigo, oposto: oposto, casaTopico: casaTopico, limparTexto: limparTexto,
+    criptoDisponivel: criptoDisponivel, paraB64: paraB64, deB64: deB64,
     criarTransporteMqtt: criarTransporteMqtt, criarBrokerMemoria: criarBrokerMemoria, criarSala: criarSala,
     carregarMqtt: carregarMqtt
   };
@@ -3929,14 +4124,11 @@ const ROT_BANDEJA = -Math.PI / 2;        // cachorros capturados olham para o ta
 // ---------------------------------------------------------------- câmera
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
 const controls = new OrbitControls(cam, canvas);
+// pedido do usuário: só 3 visões fixas (botão Câmera), sem girar arrastando e sem zoom
+controls.enabled = false;
+controls.enableRotate = false;
+controls.enableZoom = false;
 controls.enablePan = false;
-controls.enableDamping = true;
-controls.dampingFactor = 0.12;
-controls.minZoom = 0.7;
-controls.maxZoom = 3;
-controls.minPolarAngle = THREE.MathUtils.degToRad(15);
-controls.maxPolarAngle = THREE.MathUtils.degToRad(75);
-controls.rotateSpeed = 0.8;
 
 const centro = new THREE.Box3().setFromPoints(board.fitPoints).getCenter(new THREE.Vector3());
 let sujo = true;
@@ -3955,12 +4147,21 @@ function margens() {
   const baixo = barra ? Math.max(0, h - barra.getBoundingClientRect().top + stage.getBoundingClientRect().top) : 0;
   return { topo, baixo };
 }
-// vista padrão (pedido do usuário, com imagem de referência): isométrico clássico em
-// todas as telas — tabuleiro em losango, uma quina apontando para quem joga.
-function vistaPadrao() {
-  const caesPerto = cfg.mode === 'ai' && cfg.humanSide === 'D';
-  return { az: caesPerto ? 225 : 45, el: 35.264 };
+// As 3 visões (pedido do usuário): "normal" = isométrico clássico da imagem de referência
+// (losango, quina apontando para quem joga); "oposta" = a mesma, do outro lado; "cima" = de cima.
+const VISTAS = ['normal', 'oposta', 'cima'];
+const NOME_VISTA = { normal: 'Visão normal', oposta: 'Visão do lado oposto', cima: 'Visão de cima' };
+let vistaAtual = 'normal';
+function caesPertoDoJogador() {
+  return (cfg.mode === 'ai' && cfg.humanSide === 'D') || (cfg.mode === 'online' && !!sala && sala.meuLado === 'D');
 }
+function anguloDaVista(nome) {
+  const perto = caesPertoDoJogador(), base = perto ? 225 : 45;
+  if (nome === 'oposta') return { az: base + 180, el: 35.264 };
+  if (nome === 'cima') return { az: perto ? 180 : 0, el: 89.9 };   // o lado de quem joga fica embaixo na tela
+  return { az: base, el: 35.264 };
+}
+function vistaPadrao() { return anguloDaVista(vistaAtual); }
 function direcao(az, el) {
   const a = THREE.MathUtils.degToRad(az), e = THREE.MathUtils.degToRad(el);
   return new THREE.Vector3(Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a));
@@ -4001,7 +4202,10 @@ function recentrar(suave) {
   if (!suave) { cam.zoom = 1; enquadrar(direcao(v.az, v.el)); return; }
   const a = anguloAtual();
   let daz = v.az - a.az; daz = ((daz + 540) % 360) - 180;   // caminho mais curto
-  animCam = { t0: performance.now(), dur: 650, az0: a.az, el0: a.el, daz, del: v.el - a.el, z0: cam.zoom };
+  const anim = { t0: performance.now(), dur: 650, az0: a.az, el0: a.el, daz, del: v.el - a.el, z0: cam.zoom };
+  animCam = anim;
+  // mesma garantia da REG-001: sem quadros de animação, a câmera chega à visão mesmo assim
+  setTimeout(() => { if (animCam === anim) { animCam = null; cam.zoom = 1; enquadrar(direcao(v.az, v.el)); } }, anim.dur + 150);
 }
 function passoAnimCam(t) {
   if (!animCam) return false;
@@ -4157,6 +4361,8 @@ function atualizarHud() {
   $('btnParar').hidden = !cadeia || ocupado;
   $('btnDesfazer').disabled = !podeDesfazer();
   $('btnDesfazer').hidden = cfg.mode === 'online';
+  $('miniChat').hidden = cfg.mode !== 'online';
+  $('telaPartida').classList.toggle('online', cfg.mode === 'online');
   $('btnReiniciar').hidden = cfg.mode === 'online';
   $('btnSairSala').hidden = cfg.mode !== 'online';
   const n = S.captured;
@@ -4417,15 +4623,21 @@ function atualizarEscolha() {
 function irParaEscolha(modo) { cfg.mode = modo; atualizarEscolha(); mostrarTela('telaEscolha'); }
 function comecar(estado) {
   mostrarTela('telaPartida');
-  cam.zoom = 1;
+  cam.zoom = 1; vistaAtual = 'normal';
   recentrar(false);
   novaPartida(estado);
 }
+function trocarVista() {
+  vistaAtual = VISTAS[(VISTAS.indexOf(vistaAtual) + 1) % VISTAS.length];
+  recentrar(true);
+  toast(NOME_VISTA[vistaAtual]);
+}
 function abrir(id) { $(id).hidden = false; const b = $(id).querySelector('button'); if (b) b.focus(); }
-function fecharSobreposicoes() { ['menu', 'regras'].forEach((id) => { $(id).hidden = true; }); }
+function fecharSobreposicoes() { ['menu', 'regras', 'chat'].forEach((id) => { $(id).hidden = true; }); }
 function irParaInicio() {
   pedido++; ocupado = false; fecharSobreposicoes(); fecharAviso(); $('vitoria').hidden = true;
   if (sala) { sala.sair(); sala = null; esquecerSessao(); }
+  limparChat();   // privacidade: o chat some do aparelho quando a sala acaba
   mostrarTela('telaInicio');
 }
 
@@ -4487,6 +4699,8 @@ function novaSessao() {
   });
   s.on('resposta-revanche', ({ aceitar }) => { if (s === sala && !aceitar) mostrarAviso({ titulo: 'Sem revanche', texto: 'Seu adversário não quis jogar de novo agora.' }); });
   s.on('saiu', () => { if (s === sala) mostrarAviso({ titulo: 'Seu adversário saiu', texto: 'A partida online terminou.', sim: 'Ir para o início', aoSim: irParaInicio }); });
+  s.on('chat', (m) => { if (s === sala) adicionarChat(m); });
+  limparChat();
   sala = s;
   return s;
 }
@@ -4498,8 +4712,8 @@ async function aoEstadoOnline({ msg }) {
     partidaOnline = msg.partida; seqOnline = msg.seq;
     fecharAviso(); $('vitoria').hidden = true;
     guardarSessao(); marcarUrlSala();
-    if ($('telaPartida').hidden) { mostrarTela('telaPartida'); cam.zoom = 1; recentrar(false); }
-    else recentrar(true);
+    if ($('telaPartida').hidden) { mostrarTela('telaPartida'); cam.zoom = 1; vistaAtual = 'normal'; recentrar(false); }
+    else { vistaAtual = 'normal'; recentrar(true); }
     novaPartida(L.cloneState(msg.estado));
     return;
   }
@@ -4573,6 +4787,42 @@ async function compartilharConvite() {
   catch (e) { toast(`Código da sala: ${ON.formatarCodigo(sala.codigo)}`); }
 }
 
+// ---- chat (só no online). Histórico só na memória: some ao sair da sala ou recarregar.
+let historicoChat = [];
+function linhaChat(m) {
+  const p = document.createElement('p');
+  p.className = 'msg' + (m.meu ? ' meu' : '');
+  const b = document.createElement('b');
+  b.textContent = `${NOME[m.lado] || '?'}${m.meu ? ' (você)' : ''}: `;
+  const t = document.createElement('span');
+  t.textContent = m.texto;                         // sempre texto puro: nunca vira HTML
+  p.append(b, t);
+  return p;
+}
+function renderChat() {
+  $('miniLista').replaceChildren(...historicoChat.slice(-4).map(linhaChat));
+  const lista = $('chatLista');
+  lista.replaceChildren(...historicoChat.map(linhaChat));
+  lista.scrollTop = lista.scrollHeight;
+}
+function adicionarChat(m) {
+  historicoChat.push(m);
+  if (historicoChat.length > 300) historicoChat.shift();
+  renderChat();
+}
+function limparChat() { historicoChat = []; $('chatTexto').value = ''; $('chatErro').hidden = true; renderChat(); }
+function abrirChat() { abrir('chat'); renderChat(); setTimeout(() => $('chatTexto').focus(), 30); }
+$('miniChat').onclick = abrirChat;
+$('miniChat').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrirChat(); } });
+$('chatForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!sala) return;
+  const r = await sala.enviarChat($('chatTexto').value);
+  const msgErro = { chave: 'O chat ainda está conectando… tente de novo em instantes.', longo: 'Mensagem muito longa (máximo 200 caracteres).', 'sem-cripto': 'Este navegador não permite chat criptografado.', erro: 'Não consegui enviar. Tente de novo.' };
+  if (r.ok) { $('chatTexto').value = ''; $('chatErro').hidden = true; }
+  else if (r.motivo !== 'vazio') { $('chatErro').textContent = msgErro[r.motivo] || 'Não consegui enviar.'; $('chatErro').hidden = false; }
+});
+
 $('btnModoOnline').onclick = () => irParaOnline('menu');
 $('btnRetomar').onclick = () => { const s = sessaoSalva(); if (s) { irParaOnline('entrar'); $('campoCodigo').value = ON.formatarCodigo(s.codigo); buscarSala(s.codigo); } };
 $('btnCriarSala').onclick = () => etapaOnline('criar');
@@ -4621,13 +4871,41 @@ $('btnTrocar').onclick = () => {
 };
 $('btnDesfazer').onclick = desfazer;
 $('btnParar').onclick = encerrarCadeia;
-$('btnCamera').onclick = () => recentrar(true);
+$('btnCamera').onclick = trocarVista;
+// ---- som ambiente de floresta (gravação real escolhida pelo usuário em assets/sons/ambiente.mp3)
+// Toca em laço, bem baixinho, em todas as telas; segue o botão Som; pausa com a aba escondida.
+const AMBIENTE_VOLUME = 0.22;
+const ambiente = new Audio();
+ambiente.loop = true; ambiente.preload = 'none'; ambiente.volume = 0;
+ambiente.src = 'assets/sons/ambiente.mp3';
+let ambienteLiberado = false, timerFade = 0;
+ambiente.addEventListener('error', () => { ambienteLiberado = false; });   // sem arquivo: o jogo segue sem ambiente
+function atualizarAmbiente() {
+  const tocar = ambienteLiberado && !!audio && !audio.isMuted() && !document.hidden;
+  clearInterval(timerFade);
+  if (tocar) {
+    if (ambiente.paused) { const p = ambiente.play(); if (p && p.catch) p.catch(() => {}); }
+    timerFade = setInterval(() => {                         // entra devagar (~2 s)
+      ambiente.volume = Math.min(AMBIENTE_VOLUME, ambiente.volume + AMBIENTE_VOLUME / 20);
+      if (ambiente.volume >= AMBIENTE_VOLUME) clearInterval(timerFade);
+    }, 100);
+  } else {
+    ambiente.volume = 0;
+    if (!ambiente.paused) ambiente.pause();
+  }
+}
+// navegadores só deixam tocar som depois do primeiro toque do usuário
+const liberarAmbiente = () => { if (!ambienteLiberado && !SELFTEST) { ambienteLiberado = true; atualizarAmbiente(); } };
+document.addEventListener('pointerdown', liberarAmbiente, { capture: true });
+document.addEventListener('keydown', liberarAmbiente, { capture: true });
+document.addEventListener('visibilitychange', atualizarAmbiente);
+
 function atualizarBotaoSom() {
   const mudo = audio ? audio.isMuted() : true;
   $('btnSom').setAttribute('aria-pressed', String(!mudo));
   $('btnSom').querySelector('span').textContent = mudo ? 'Sem som' : 'Som';
 }
-$('btnSom').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarBotaoSom(); if (!audio.isMuted()) som('toc', 0.8); };
+$('btnSom').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarBotaoSom(); atualizarAmbiente(); if (!audio.isMuted()) som('toc', 0.8); };
 atualizarBotaoSom();
 
 // ---------------------------------------------------------------- ganchos de teste
@@ -4727,6 +5005,18 @@ async function autoteste() {
     check('início: texto da vez (2 jogadores)', $('status').textContent === 'Vez do Jogador 1 (Onça)', $('status').textContent);
     check('início: canvas desenhou', renderer.info.render.calls > 0, renderer.info.render.calls);
 
+    // câmera: só 3 visões fixas pelo botão; arrastar não gira e a roda/pinça não aproxima
+    const p0 = cam.position.clone(), z0 = cam.zoom;
+    const ev = (tipo, x, y, extra) => canvas.dispatchEvent(new PointerEvent(tipo, Object.assign({ clientX: x, clientY: y, bubbles: true, pointerId: 7, pointerType: 'mouse', isPrimary: true }, extra)));
+    ev('pointerdown', 150, 300, { button: 0, buttons: 1 }); ev('pointermove', 330, 380, { buttons: 1 }); ev('pointerup', 330, 380, { button: 0 });
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, clientX: 200, clientY: 300, bubbles: true, cancelable: true }));
+    await dormir(120);
+    check('câmera: arrastar não gira e a roda do mouse não aproxima', cam.position.distanceTo(p0) < 1e-6 && cam.zoom === z0 && vistaAtual === 'normal');
+    const vistas = [];
+    for (let k = 0; k < 3; k++) { $('btnCamera').click(); await dormir(900); vistas.push([vistaAtual, Math.round(anguloAtual().el)]); }
+    check('câmera: botão alterna normal → lado oposto → de cima → normal', JSON.stringify(vistas) === JSON.stringify([['oposta', 35], ['cima', 90], ['normal', 35]]), vistas);
+    check('câmera: aviso com o nome da visão', !$('toast').hidden && $('toast').textContent === 'Visão normal', $('toast').textContent);
+
     // onça anda 12 -> 17
     clicarPonto(12); clicarPonto(17); await ocioso();
     check('onça anda com cliques (12 -> 17)', S.jaguar === 17 && S.turn === 'D' && perto(puma, 17), { jaguar: S.jaguar, turn: S.turn });
@@ -4821,6 +5111,35 @@ async function autoteste() {
     check('REG-006 adversário aparece conectado logo ao começar (criador e convidado)', sala.adversarioOnline && conv.adversarioOnline && $('vez').dataset.rede === 'on',
       { eu: sala._diag(), conv: conv._diag() });
     check('online: sem botão Desfazer', $('btnDesfazer').hidden && !podeDesfazer());
+
+    // CHAT criptografado de ponta a ponta
+    await esperar(() => sala.chatPronto && conv.chatPronto, 3000);
+    check('chat: chave secreta combinada nos dois celulares', sala.chatPronto && conv.chatPronto, { eu: sala._diag(), conv: conv._diag() });
+    check('chat: caixinha aparece no canto inferior esquerdo', !$('miniChat').hidden && (() => { const r = $('miniChat').getBoundingClientRect(); return r.left < 40 && r.bottom > window.innerHeight * 0.6; })());
+    const recebidasRobo = [];
+    conv.on('chat', (m) => { if (!m.meu) recebidasRobo.push(m); });
+    $('miniChat').click(); await dormir(60);
+    check('chat: tocar na caixinha abre o chat completo', !$('chat').hidden);
+    $('chatTexto').value = 'Boa sorte!'; $('chatForm').requestSubmit();
+    await esperar(() => recebidasRobo.length === 1, 3000);
+    check('chat: minha mensagem chega decifrada no outro celular', recebidasRobo.length === 1 && recebidasRobo[0].texto === 'Boa sorte!' && recebidasRobo[0].lado === 'J', recebidasRobo);
+    const noServidor = broker.publicacoes.filter((p) => p.topico.endsWith('/chat'));
+    check('cripto: no servidor só passa texto embaralhado (sem o texto, sem nomes)', noServidor.length >= 1 && noServidor.every((p) => {
+      const bruto = JSON.stringify(p.msg);
+      return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
+    }), noServidor.map((p) => p.msg));
+    await conv.enviarChat('<img src=x onerror="window.__xss=1"><b>oi</b>');
+    await esperar(() => historicoChat.length === 2, 3000);
+    check('segurança: texto com código vira só texto (nada é executado)', !document.querySelector('#miniChat img, #chatLista img, #chatLista b b') && !window.__xss && $('chatLista').textContent.includes('<img src=x'), $('chatLista').textContent);
+    for (let k = 1; k <= 4; k++) await conv.enviarChat('msg ' + k);
+    await esperar(() => historicoChat.length === 6, 3000);
+    check('chat: a caixinha mostra só as últimas 4; o chat completo mostra todas', $('miniLista').children.length === 4 && $('chatLista').children.length === 6, [$('miniLista').children.length, $('chatLista').children.length]);
+    check('chat: nome Onça/Cachorros em cada mensagem', $('miniLista').lastElementChild.textContent === 'Cachorros: msg 4' && $('chatLista').firstElementChild.textContent === 'Onça (você): Boa sorte!', [$('miniLista').lastElementChild.textContent, $('chatLista').firstElementChild.textContent]);
+    check('chat: mensagem longa demais é recusada', (await sala.enviarChat('x'.repeat(ON.LIMITE_CHAT + 1))).motivo === 'longo');
+    check('REG-002 layout: chat completo cabe na tela', vazamentos().length === 0, vazamentos());
+    $('chat').querySelector('[data-fechar]').click(); await dormir(30);
+    check('chat: fechar volta para o jogo com a caixinha visível', $('chat').hidden && !$('miniChat').hidden);
+    check('privacidade: tudo o que fica guardado no servidor tem validade', broker.publicacoes.filter((p) => p.opcoes.reter && p.msg).every((p) => p.opcoes.expiraSeg > 0 && p.opcoes.expiraSeg <= ON.EXPIRA_RETIDO_SEG));
     check('REG-002 layout: partida online cabe na tela', vazamentos().length === 0, vazamentos());
     check('REG-003 texto da vez inteiro (online)', !cortado(), $('status').textContent);
     // meu lance chega ao adversário
@@ -4865,6 +5184,10 @@ async function autoteste() {
     check('online: aviso quando o adversário sai', !$('avisoOnline').hidden && /saiu/.test($('avisoTitulo').textContent), $('avisoTitulo').textContent);
     $('avisoSim').click(); await dormir(30);
     check('online: "Ir para o início" fecha a sala', !$('telaInicio').hidden && sala === null);
+    check('privacidade: ao sair, o chat some do aparelho', historicoChat.length === 0 && $('chatLista').children.length === 0 && $('miniLista').children.length === 0);
+    await dormir(50);
+    const sobras = Object.keys(broker.retidos).filter((k) => k.indexOf(ON.PREFIXO + codigo + '/') === 0);
+    check('privacidade: ao sair, nada da sala fica guardado no servidor', sobras.length === 0, sobras);
     // entrar pelo código: código inválido avisa
     irParaOnline('entrar'); $('campoCodigo').value = 'XX'; $('btnBuscarSala').click(); await dormir(30);
     check('online: código inválido mostra aviso', !$('erroOnline').hidden && /inválido/.test($('erroOnline').textContent), $('erroOnline').textContent);

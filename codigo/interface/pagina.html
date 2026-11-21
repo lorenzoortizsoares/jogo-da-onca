@@ -6,6 +6,9 @@
 <title>Jogo da Onça</title>
 <meta name="description" content="Jogo da Onça: jogo de tabuleiro tradicional de povos indígenas do Brasil, em 3D.">
 <meta name="theme-color" content="#1B1A1F">
+<link rel="icon" type="image/svg+xml" href="{{dataurl:codigo/interface/icone.svg}}">
+<link rel="icon" type="image/png" sizes="180x180" href="{{dataurl:codigo/interface/icone-180.png}}">
+<link rel="apple-touch-icon" href="{{dataurl:codigo/interface/icone-180.png}}">
 <!-- ARQUIVO GERADO por ferramentas/montar.ps1 a partir de codigo/. Não edite o index.html à mão. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -197,6 +200,12 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
 
   <button type="button" class="btn btn-atencao btn-parar" id="btnParar" hidden>Parar de capturar</button>
 
+  <!-- chat online: caixinha sempre visível (últimas 4 mensagens); tocar abre o chat completo -->
+  <div class="minichat" id="miniChat" role="button" tabindex="0" aria-label="Chat: toque para abrir" hidden>
+    <div class="minichat-lista" id="miniLista" aria-live="polite"></div>
+    <p class="minichat-dica" id="miniDica">Toque para conversar</p>
+  </div>
+
   <nav class="barra" aria-label="Ações">
     <button type="button" class="acao" id="btnDesfazer" disabled>
       <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
@@ -263,7 +272,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         <li><b>A onça vence</b> ao capturar 5 cachorros.</li>
         <li><b>Os cachorros vencem</b> quando deixam a onça sem nenhum movimento. A toca é uma ótima armadilha!</li>
       </ul>
-      <p class="nota">Toque numa peça sua e depois num ponto destacado. Arraste para girar o tabuleiro; use a pinça (ou a roda do mouse) para aproximar.</p>
+      <p class="nota">Toque numa peça sua e depois num ponto destacado. O botão Câmera troca a visão: normal, do lado oposto e de cima.</p>
       <button type="button" class="btn btn-primario" data-fechar>Entendi</button>
     </div>
   </div>
@@ -280,6 +289,26 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         <button type="button" class="btn btn-primario btn-grande" id="avisoSim">OK</button>
         <button type="button" class="btn btn-secundario" id="avisoNao">Cancelar</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= CHAT COMPLETO ================= -->
+<div class="sobre" id="chat" role="dialog" aria-modal="true" aria-labelledby="chatTitulo" hidden>
+  <div class="gaveta gaveta-chat">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <div class="chat-topo">
+        <h2 id="chatTitulo">Chat</h2>
+        <button type="button" class="btn btn-fantasma btn-fechar" data-fechar aria-label="Fechar o chat">Fechar</button>
+      </div>
+      <p class="nota chat-aviso">Mensagens criptografadas de ponta a ponta e apagadas quando vocês saem da sala. Não mande senhas nem dados pessoais.</p>
+      <div class="chat-lista" id="chatLista" role="log" aria-live="polite"></div>
+      <form class="chat-envio" id="chatForm" autocomplete="off">
+        <input id="chatTexto" type="text" maxlength="200" enterkeyhint="send" placeholder="Escreva uma mensagem…" aria-label="Mensagem">
+        <button type="submit" class="btn btn-primario" id="chatEnviar">Enviar</button>
+      </form>
+      <p class="nota erro" id="chatErro" hidden></p>
     </div>
   </div>
 </div>

@@ -9,6 +9,11 @@
 // Testes do protocolo online com um servidor simulado (em memória): sem internet, determinístico.
 (function () {
   var L = window.OncaLogic, ON = window.OncaOnline;
+  // REG-008: se o módulo online tiver erro de sintaxe, ele nem carrega — avisa com clareza
+  if (!ON || typeof ON.criarSala !== 'function') {
+    document.getElementById('out').textContent = 'RESUMO: 0 passaram, 1 falharam  [FIM]\nFAIL  REG-008: codigo/online.js não carregou (erro de sintaxe?)';
+    return;
+  }
   var linhas = [], ok = 0, falhas = 0;
   function registrar(nome, cond, info) {
     if (cond) ok++; else falhas++;
@@ -139,6 +144,102 @@
       await esperar(function () { return B4.estado; }, 400);
       registrar('ordem: estado que chega antes da sala é guardado e aplicado', !!B4.estado && B4.estado.partida === 1 && B4.meuLado === 'J', { lado: B4.meuLado, estado: !!B4.estado, chaveEstado: !!retidos[chaveEstado] });
       A2.fechar(); B3.fechar(); B4.fechar();
+
+      // ================= CHAT: criptografia e segurança =================
+      var bc = ON.criarBrokerMemoria();
+      var CA = nova(bc, 'chatA'), CB = nova(bc, 'chatB');
+      var rc = await CA.criar('J'); await CB.consultar(rc.codigo); await CB.entrar(1500);
+      await esperar(function () { return CA.chatPronto && CB.chatPronto; }, 2000);
+      registrar('cripto: os dois celulares combinam a chave sozinhos', CA.chatPronto && CB.chatPronto);
+      var chegouB = [], chegouA = [];
+      CB.on('chat', function (m) { if (!m.meu) chegouB.push(m); });
+      CA.on('chat', function (m) { if (!m.meu) chegouA.push(m); });
+      var r1 = await CA.enviarChat('Olá, tudo bem? Boa sorte!');
+      await CB.enviarChat('Valeu! 😄');
+      await esperar(function () { return chegouB.length === 1 && chegouA.length === 1; }, 1000);
+      registrar('cripto: mensagem chega decifrada nos dois sentidos (com acentos e emoji)', r1.ok && chegouB[0] && chegouB[0].texto === 'Olá, tudo bem? Boa sorte!' && chegouA[0] && chegouA[0].texto === 'Valeu! 😄' && chegouB[0].lado === 'J' && chegouA[0].lado === 'D', { B: chegouB, A: chegouA });
+      var pubs = bc.publicacoes.filter(function (p) { return /\/chat$/.test(p.topico); });
+      registrar('cripto: no servidor só passa texto embaralhado', pubs.length === 2 && pubs.every(function (p) {
+        var bruto = JSON.stringify(p.msg); return bruto.indexOf('Olá') < 0 && bruto.indexOf('Valeu') < 0 && Object.keys(p.msg).sort().join() === 'ct,id,iv';
+      }), pubs.map(function (p) { return p.msg; }));
+      registrar('cripto: cada mensagem usa um vetor (IV) diferente', pubs[0].msg.iv !== pubs[1].msg.iv);
+
+      // espião: sabe o código, assina a sala, tem a própria chave — e mesmo assim não lê
+      var espiao = bc.criarTransporte(), capturadas = [];
+      await espiao.conectar('espiao', {}); espiao.aoMensagem(function (t, m) { if (/\/chat$/.test(t)) capturadas.push(m); });
+      espiao.assinar(ON.PREFIXO + rc.codigo + '/#');
+      await CA.enviarChat('segredo do jogo');
+      await esperar(function () { return capturadas.length === 1; }, 500);
+      var leu = false;
+      try {
+        var par = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+        var pubA = bc.retidos[ON.PREFIXO + rc.codigo + '/chave/chatA'].pub;
+        var pa = await crypto.subtle.importKey('raw', ON.deB64(pubA), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+        var bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: pa }, par.privateKey, 256);
+        var hk = await crypto.subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
+        var k = await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode(rc.codigo), info: new TextEncoder().encode('jogo-da-onca/chat/v1|chatA|chatB') }, hk, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+        await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ON.deB64(capturadas[0].iv), additionalData: new TextEncoder().encode(rc.codigo + '|chatA') }, k, ON.deB64(capturadas[0].ct));
+        leu = true;
+      } catch (e) { leu = false; }
+      registrar('cripto: quem só sabe o código (espião) não consegue ler', capturadas.length === 1 && !leu && JSON.stringify(capturadas[0]).indexOf('segredo') < 0);
+
+      // adulteração: troca 1 byte do texto cifrado
+      var antesRej = CB._diag().chatRejeitadas, antesN = chegouB.length;
+      var adult = JSON.parse(JSON.stringify(capturadas[0]));
+      var bytes = ON.deB64(adult.ct); bytes[3] ^= 0x01; adult.ct = ON.paraB64(bytes);
+      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', adult, { espiao: true });
+      await dormir(80);
+      registrar('cripto: mensagem adulterada é descartada', CB._diag().chatRejeitadas === antesRej + 1 && chegouB.length === antesN, CB._diag());
+
+      // replay: reenviar a mesma mensagem capturada
+      antesRej = CB._diag().chatRejeitadas; antesN = chegouB.length;
+      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', capturadas[0], { espiao: true });
+      await dormir(80);
+      registrar('cripto: mensagem repetida (replay) é descartada', CB._diag().chatRejeitadas === antesRej + 1 && chegouB.length === antesN);
+
+      // estranho tentando mandar mensagem (com o próprio id ou fingindo ser o jogador A)
+      antesRej = CB._diag().chatRejeitadas; antesN = chegouB.length;
+      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', { id: 'espiao', iv: capturadas[0].iv, ct: capturadas[0].ct }, { espiao: true });
+      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', { id: 'chatA', iv: ON.paraB64(new Uint8Array(12)), ct: ON.paraB64(new Uint8Array(40)) }, { espiao: true });
+      espiao.publicar(ON.PREFIXO + rc.codigo + '/chat', { id: 'chatA', iv: 'nao-e-base64!!', ct: 123 }, { espiao: true });
+      await dormir(80);
+      registrar('segurança: estranho não consegue mandar mensagem (nem fingindo ser o outro)', chegouB.length === antesN);
+
+      // chave pública falsa de estranho é ignorada (só vale a do adversário, no tópico dele)
+      espiao.publicar(ON.PREFIXO + rc.codigo + '/chave/espiao', { id: 'espiao', pub: pubA }, { reter: true, espiao: true });
+      espiao.publicar(ON.PREFIXO + rc.codigo + '/chave/chatA', { id: 'outro', pub: pubA }, { reter: false, espiao: true });
+      await dormir(50);
+      await CA.enviarChat('ainda funciona');
+      await esperar(function () { return chegouB.length === antesN + 1; }, 800);
+      registrar('segurança: chave falsa não atrapalha o chat', chegouB[chegouB.length - 1].texto === 'ainda funciona');
+
+      // limites
+      registrar('chat: vazio e longo demais são recusados', (await CA.enviarChat('   ')).motivo === 'vazio' && (await CA.enviarChat('x'.repeat(ON.LIMITE_CHAT + 1))).motivo === 'longo');
+      registrar('chat: caracteres de controle são limpos', ON.limparTexto('a' + String.fromCharCode(0) + 'b\nc' + String.fromCharCode(0x2028) + 'd') === 'a b c d');
+
+      // recarregar: chave nova, o chat continua
+      CB.fechar();
+      var CB2 = nova(bc, 'chatB'), chegouB2 = [];
+      CB2.on('chat', function (m) { if (!m.meu) chegouB2.push(m); });
+      await CB2.reconectar(rc.codigo);
+      await esperar(function () { return CB2.chatPronto && CA.chatPronto; }, 2000);
+      await CA.enviarChat('voltou?');
+      await esperar(function () { return chegouB2.length === 1; }, 1000);
+      registrar('chat: depois de recarregar a página, nova chave e o chat continua', chegouB2.length === 1 && chegouB2[0].texto === 'voltou?', CB2._diag());
+
+      // privacidade no servidor
+      // só o que o NOSSO jogo publicou (o espião acima publicou lixo de propósito, marcado com opcoes.espiao)
+      var todas = bc.publicacoes.filter(function (p) { return p.topico.indexOf(ON.PREFIXO + rc.codigo + '/') === 0 && !p.opcoes.espiao; });
+      registrar('privacidade: chat nunca fica guardado no servidor', todas.filter(function (p) { return /\/chat$/.test(p.topico); }).every(function (p) { return !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG; }) && !Object.keys(bc.retidos).some(function (t) { return /\/chat$/.test(t); }));
+      registrar('privacidade: o que fica guardado tem validade (some sozinho em até 6 h)', todas.filter(function (p) { return p.opcoes.reter && p.msg; }).every(function (p) { return p.opcoes.expiraSeg > 0 && p.opcoes.expiraSeg <= ON.EXPIRA_RETIDO_SEG; }));
+      var camposPermitidos = { v: 1, criador: 1, convidado: 1, status: 1, servidor: 1, t: 1, partida: 1, seq: 1, estado: 1, lance: 1, autor: 1, tipo: 1, id: 1, trocar: 1, aceitar: 1, para: 1, online: 1, pub: 1, iv: 1, ct: 1 };
+      var estranhos = [];
+      todas.forEach(function (p) { if (p.msg) Object.keys(p.msg).forEach(function (c) { if (!camposPermitidos[c]) estranhos.push(c); }); });
+      registrar('privacidade: nenhum dado pessoal nas mensagens (só campos do jogo)', estranhos.length === 0, estranhos);
+      CA.sair(); CB2.sair();
+      await dormir(60);
+      var sobras = Object.keys(bc.retidos).filter(function (t) { return t.indexOf(ON.PREFIXO + rc.codigo + '/') === 0 && !/\/chave\/espiao$/.test(t); });
+      registrar('privacidade: quando saem da sala, nada fica guardado no servidor', sobras.length === 0, sobras);
     } catch (e) {
       registrar('exceção: ' + (e && e.stack || e), false);
     }

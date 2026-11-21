@@ -89,6 +89,14 @@ $inicio = Get-Date
 $m = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $raiz 'ferramentas\montar.ps1') 2>&1
 Registrar 'Montagem do index.html' ($LASTEXITCODE -eq 0) ($m -join ' ')
 
+# 1b) varredura do código (REG-008): caracteres invisíveis U+2028/U+2029 quebram o JavaScript
+$invisiveis = @()
+Get-ChildItem (Join-Path $raiz 'codigo') -Recurse -File -Include *.js, *.html, *.css | ForEach-Object {
+  $t = [System.IO.File]::ReadAllText($_.FullName, (New-Object System.Text.UTF8Encoding($false)))
+  if ($t.Contains([string][char]0x2028) -or $t.Contains([string][char]0x2029)) { $invisiveis += $_.FullName.Substring($raiz.Length + 1) }
+}
+Registrar 'Varredura do código: sem caracteres invisíveis que quebram o JavaScript' ($invisiveis.Count -eq 0) ($(if ($invisiveis.Count) { 'Arquivos com U+2028/U+2029: ' + ($invisiveis -join ', ') } else { 'ok' }))
+
 # 2) back end: regras + computador (IA)
 # REG-005: no "tempo virtual" do Chrome sem janela o relógio dispara quando a página fica ociosa;
 # com orçamento pequeno os testes do Worker não terminavam. 4.000.000 ms virtuais ≈ 25 s reais.

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Gerar ícone PNG</title></head>
+<body>
+<!-- Gera o ícone PNG 180x180 (tela inicial do iPhone/Android) a partir de codigo/interface/icone.svg.
+     Uso: Chrome sem janela com --dump-dom; o PNG sai em base64 dentro de <pre id="png">. -->
+<pre id="png">gerando</pre>
+<script>
+  var img = new Image();
+  img.onload = function () {
+    var c = document.createElement('canvas'); c.width = 180; c.height = 180;
+    var g = c.getContext('2d');
+    g.drawImage(img, 0, 0, 180, 180);
+    document.getElementById('png').textContent = c.toDataURL('image/png').split(',')[1];
+  };
+  img.onerror = function () { document.getElementById('png').textContent = 'ERRO'; };
+  img.src = '../codigo/interface/icone.svg';
+</script>
+</body>
+</html>

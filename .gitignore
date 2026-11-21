@@ -1,3 +1,6 @@
 # relatórios e prints gerados pelos testes (recriados a cada execução)
 testes/relatorios/
 *.log
+
+# opções de som para escolher (só o escolhido vai para o jogo, como assets/sons/ambiente.mp3)
+assets/sons/opcoes/

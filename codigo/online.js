@@ -17,6 +17,27 @@
   var ALFABETO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // sem 0/O, 1/I/L (evita confusão ao digitar)
   var SERVIDORES = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
   var MQTT_JS = 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';
+  // privacidade: nada fica guardado para sempre no servidor
+  var EXPIRA_RETIDO_SEG = 6 * 3600;   // dados da sala somem sozinhos em 6 h (mesmo se ninguém "sair" direito)
+  var EXPIRA_MSG_SEG = 120;           // mensagens de passagem (lances avisos, chat) nunca ficam guardadas
+  var LIMITE_CHAT = 200;              // caracteres por mensagem
+  var INFO_CHAT = 'jogo-da-onca/chat/v1';
+
+  // ---------------------------------------------------------------- utilidades de criptografia
+  function criptoDisponivel() { return !!(root.crypto && root.crypto.subtle && root.crypto.getRandomValues); }
+  function paraB64(bytes) { var s = ''; var u = new Uint8Array(bytes); for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); }
+  function deB64(txt) { var s = atob(txt); var u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+  function utf8(txt) { return new TextEncoder().encode(txt); }
+  // REG-008: não usar caracteres invisíveis (U+2028/U+2029) dentro de expressões regulares no código:
+  // eles contam como quebra de linha e derrubavam o módulo inteiro. Filtra por código numérico.
+  function limparTexto(txt) {
+    var s = String(txt == null ? '' : txt), out = '';
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      out += (c < 32 || c === 127 || c === 0x2028 || c === 0x2029) ? ' ' : s.charAt(i);
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  }
 
   function gerarCodigo(rng) {
     rng = rng || Math.random;
@@ -67,8 +88,9 @@
             var will = opcoes && opcoes.will;
             cli = mqtt.connect(url, {
               clientId: id + '-' + Math.random().toString(36).slice(2, 7),
+              protocolVersion: 5,          // MQTT 5: permite validade (expiração) nas mensagens guardadas
               clean: true, keepalive: 20, connectTimeout: 7000, reconnectPeriod: 2500, resubscribe: true,
-              will: will ? { topic: will.topico, payload: JSON.stringify(will.dados), qos: 1, retain: false } : undefined
+              will: will ? { topic: will.topico, payload: JSON.stringify(will.dados), qos: 1, retain: false, properties: { messageExpiryInterval: EXPIRA_MSG_SEG } } : undefined
             });
             cli.on('connect', function () { aoEst(true); if (!feito) { feito = true; resolve(); } });
             cli.on('offline', function () { aoEst(false); });
@@ -84,7 +106,11 @@
           });
         });
       },
-      publicar: function (t, obj, o) { if (cli) cli.publish(t, obj == null ? '' : JSON.stringify(obj), { qos: 1, retain: !!(o && o.reter) }); },
+      publicar: function (t, obj, o) {
+        if (!cli) return;
+        var props = o && o.expiraSeg ? { messageExpiryInterval: o.expiraSeg } : undefined;
+        cli.publish(t, obj == null ? '' : JSON.stringify(obj), { qos: 1, retain: !!(o && o.reter), properties: props });
+      },
       assinar: function (filtro) { if (cli) cli.subscribe(filtro, { qos: 1 }); },
       aoMensagem: function (cb) { aoMsg = cb; },
       aoConexao: function (cb) { aoEst = cb; },
@@ -103,7 +129,7 @@
     return f.length === t.length;
   }
   function criarBrokerMemoria() {
-    var retidos = {}, clientes = [];
+    var retidos = {}, clientes = [], publicacoes = [];   // publicacoes: tudo o que passou pelo "servidor" (para os testes de privacidade)
     var depois = function (fn) { setTimeout(fn, 0); };
     function entregar(topico, msg) {
       clientes.forEach(function (c) {
@@ -116,6 +142,7 @@
     }
     return {
       retidos: retidos,
+      publicacoes: publicacoes,
       criarTransporte: function () {
         var c = { ligado: false, filtros: [], will: null, aoMsg: function () {}, aoEst: function () {} };
         clientes.push(c);
@@ -124,6 +151,7 @@
           conectar: function (id, opcoes) { c.will = opcoes && opcoes.will; c.ligado = true; depois(function () { c.aoEst(true); }); return Promise.resolve(); },
           publicar: function (t, obj, o) {
             var msg = copia(obj);
+            publicacoes.push({ topico: t, msg: copia(msg), opcoes: copia(o || {}) });
             if (o && o.reter) { if (msg == null) delete retidos[t]; else retidos[t] = msg; }
             if (msg != null) entregar(t, msg);
           },
@@ -149,12 +177,68 @@
     var s = {
       id: o.id || gerarId(), codigo: null, servidor: 0, transporte: null,
       info: null, estado: null, conectado: false, adversarioOnline: false, ultimaBatida: 0,
-      relogios: [], encerrada: false
+      relogios: [], encerrada: false,
+      // chat criptografado de ponta a ponta (ECDH P-256 -> HKDF-SHA256 -> AES-GCM 256)
+      par: null, minhaPub: null, pubAdv: null, chaveChat: null, contChat: 0, ultimoN: -1,
+      chatRejeitadas: 0, filaChat: Promise.resolve(), geracaoChave: 0
     };
     function emitir(nome, dado) { (eventos[nome] || []).slice().forEach(function (cb) { cb(dado); }); }
     function base() { return PREFIXO + s.codigo + '/'; }
     function agora() { return Date.now(); }
-    function publicar(sufixo, dados, reter) { if (s.transporte) s.transporte.publicar(base() + sufixo, dados, { reter: !!reter }); }
+    // retidos (sala, estado, chaves) expiram sozinhos; o resto é só "de passagem"
+    function publicar(sufixo, dados, reter) {
+      if (s.transporte) s.transporte.publicar(base() + sufixo, dados, { reter: !!reter, expiraSeg: reter ? EXPIRA_RETIDO_SEG : EXPIRA_MSG_SEG });
+    }
+
+    // ---- chaves do chat: cada aparelho gera um par só seu; a chave secreta nunca passa pelo servidor
+    function prepararChave() {
+      if (s.par || !criptoDisponivel() || !papel()) return;
+      var subtle = root.crypto.subtle;
+      s.par = subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']).then(function (par) {
+        return subtle.exportKey('raw', par.publicKey).then(function (raw) {
+          if (s.encerrada) return par;
+          s.minhaPub = paraB64(raw);
+          publicar('chave/' + s.id, { id: s.id, pub: s.minhaPub }, true);
+          derivar();
+          return par;
+        });
+      });
+    }
+    function derivar() {
+      if (!s.par || !s.pubAdv || !s.minhaPub) return;
+      var subtle = root.crypto.subtle, pubAdv = s.pubAdv, geracao = ++s.geracaoChave;
+      var ids = [s.id, idAdversario()].sort().join('|');
+      s.par.then(function (par) {
+        return subtle.importKey('raw', deB64(pubAdv), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+          .then(function (pub) { return subtle.deriveBits({ name: 'ECDH', public: pub }, par.privateKey, 256); })
+          .then(function (bits) { return subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']); })
+          .then(function (hk) {
+            return subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: utf8(s.codigo), info: utf8(INFO_CHAT + '|' + ids) },
+              hk, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+          });
+      }).then(function (chave) {
+        if (geracao !== s.geracaoChave || s.encerrada) return;
+        s.chaveChat = chave; s.ultimoN = -1;
+        emitir('chat-pronto', true);
+      }, function () { s.chaveChat = null; });
+    }
+    function decifrarChat(msg) {
+      var chave = s.chaveChat;
+      if (!chave) { s.chatRejeitadas++; return Promise.resolve(); }
+      var iv, ct;
+      try { iv = deB64(msg.iv); ct = deB64(msg.ct); } catch (e) { s.chatRejeitadas++; return Promise.resolve(); }
+      if (iv.length !== 12 || ct.length < 17 || ct.length > 2048) { s.chatRejeitadas++; return Promise.resolve(); }
+      return root.crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv, additionalData: utf8(s.codigo + '|' + msg.id) }, chave, ct)
+        .then(function (claro) {
+          var d = JSON.parse(new TextDecoder().decode(claro));
+          var texto = limparTexto(d && d.t);
+          // contador crescente: mensagem repetida (replay) ou fora de ordem é descartada
+          if (!texto || texto.length > LIMITE_CHAT || typeof d.n !== 'number' || !(d.n > s.ultimoN) || chave !== s.chaveChat) { s.chatRejeitadas++; return; }
+          s.ultimoN = d.n;
+          emitir('chat', { meu: false, lado: oposto(meuLado()), texto: texto, ts: Date.now() });
+        })
+        .catch(function () { s.chatRejeitadas++; });   // adulterada, chave errada ou lixo
+    }
 
     function meuLado() {
       if (!s.info || !s.info.criador) return null;
@@ -185,6 +269,10 @@
         // REG-006: acabei de descobrir quem é o adversário -> bato na hora (senão ele me
         // veria como "desconectado" até a próxima batida periódica)
         if (!advAntes && idAdversario()) bater();
+        prepararChave();
+        if (s.chavesRecebidas && idAdversario() && s.chavesRecebidas[idAdversario()] && s.pubAdv !== s.chavesRecebidas[idAdversario()]) {
+          s.pubAdv = s.chavesRecebidas[idAdversario()]; derivar();
+        }
         emitir('sala', msg);
         // o estado pode ter chegado antes da sala: processa agora
         if (s.estadoPendente) { var p = s.estadoPendente; s.estadoPendente = null; receber(base() + 'estado', p); }
@@ -201,6 +289,19 @@
         return;
       }
       if (resto === 'pedido') { if (msg.id !== s.id) tratarPedido(msg); return; }
+      if (resto.indexOf('chave/') === 0) {
+        // chave pública de um jogador (retida): guardo por id e derivo quando for a do adversário
+        if (typeof msg.id !== 'string' || typeof msg.pub !== 'string' || msg.pub.length > 200 || msg.id === s.id || resto !== 'chave/' + msg.id) return;
+        s.chavesRecebidas = s.chavesRecebidas || {};
+        s.chavesRecebidas[msg.id] = msg.pub;
+        if (msg.id === idAdversario() && msg.pub !== s.pubAdv) { s.pubAdv = msg.pub; s.chaveChat = null; derivar(); }
+        return;
+      }
+      if (resto === 'chat') {
+        if (msg.id === s.id || msg.id !== idAdversario() || typeof msg.iv !== 'string' || typeof msg.ct !== 'string') return;
+        s.filaChat = s.filaChat.then(function () { return decifrarChat(msg); });   // decifra na ordem de chegada
+        return;
+      }
       if (resto.indexOf('presenca/') === 0) {
         if (msg.id === s.id || msg.id !== idAdversario()) return;
         s.batidasRecebidas = (s.batidasRecebidas || 0) + 1;
@@ -226,6 +327,7 @@
           publicar('estado', { partida: 1, seq: 0, estado: o.initialState(), lance: null, autor: s.id }, true);
           marcarPresenca(p.id);   // REG-006: o pedido de entrada já prova que ele está online
           bater();                // e ele recebe a minha batida logo depois da sala
+          if (s.chavesRecebidas && s.chavesRecebidas[p.id]) { s.pubAdv = s.chavesRecebidas[p.id]; derivar(); }
         } else if (!s.info.convidado || s.info.convidado.id !== p.id) {
           publicar('pedido', { tipo: 'cheia', id: s.id, para: p.id });
         }
@@ -294,7 +396,27 @@
       get adversarioOnline() { return s.adversarioOnline; },
       get meuLado() { return meuLado(); },
       get papel() { return papel(); },
+      get chatPronto() { return !!s.chaveChat; },
+      get chatDisponivel() { return criptoDisponivel(); },
       on: function (nome, cb) { (eventos[nome] = eventos[nome] || []).push(cb); return api; },
+
+      // chat: só sai do aparelho criptografado (AES-GCM com a chave combinada pelos dois)
+      enviarChat: function (txt) {
+        var texto = limparTexto(txt);
+        if (!texto) return Promise.resolve({ ok: false, motivo: 'vazio' });
+        if (texto.length > LIMITE_CHAT) return Promise.resolve({ ok: false, motivo: 'longo' });
+        if (!criptoDisponivel()) return Promise.resolve({ ok: false, motivo: 'sem-cripto' });
+        if (!s.chaveChat || !idAdversario()) return Promise.resolve({ ok: false, motivo: 'chave' });
+        var chave = s.chaveChat, n = ++s.contChat;
+        var iv = root.crypto.getRandomValues(new Uint8Array(12));
+        var claro = utf8(JSON.stringify({ t: texto, n: n }));
+        return root.crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv, additionalData: utf8(s.codigo + '|' + s.id) }, chave, claro)
+          .then(function (ct) {
+            publicar('chat', { id: s.id, iv: paraB64(iv), ct: paraB64(ct) }, false);
+            emitir('chat', { meu: true, lado: meuLado(), texto: texto, ts: Date.now() });
+            return { ok: true };
+          }, function () { return { ok: false, motivo: 'erro' }; });
+      },
 
       // cria uma sala nova; quem cria escolhe o lado
       criar: function (lado, codigo) {
@@ -303,6 +425,7 @@
           s.info = { v: 1, criador: { id: s.id, lado: lado === 'J' ? 'J' : 'D' }, convidado: null, status: 'aguardando', servidor: s.servidor, t: agora() };
           publicar('sala', s.info, true);
           publicar('estado', null, true);   // limpa partida antiga com o mesmo código (improvável)
+          prepararChave();
           return { codigo: s.codigo };
         });
       },
@@ -370,27 +493,38 @@
       },
       sair: function () {
         if (!s.transporte) return;
+        var jogador = !!papel(), adv = idAdversario();
         publicar('pedido', { tipo: 'sair', id: s.id });
         publicar('presenca/' + s.id, { id: s.id, online: false });
-        if (papel() === 'criador' && s.info && s.info.status === 'aguardando') publicar('sala', null, true);
+        if (jogador) {
+          // privacidade: a sala acabou -> apaga tudo o que ficou guardado no servidor
+          publicar('sala', null, true);
+          publicar('estado', null, true);
+          publicar('chave/' + s.id, null, true);
+          if (adv) publicar('chave/' + adv, null, true);
+        }
         api.fechar();
       },
       fechar: function () {
         s.encerrada = true;
         pararBatidas();
+        // apaga os segredos do chat da memória
+        s.par = null; s.chaveChat = null; s.minhaPub = null; s.pubAdv = null; s.chavesRecebidas = null;
         var tr = s.transporte; s.transporte = null;
         if (tr) setTimeout(function () { tr.desconectar(); }, 150);
       },
       _transporte: function () { return s.transporte; },  // testes
-      _diag: function () { return { ultimaBatida: s.ultimaBatida, agora: agora(), idAdversario: idAdversario(), batidasRecebidas: s.batidasRecebidas || 0, batidasEnviadas: s.batidasEnviadas || 0, relogios: s.relogios.length, codigo: s.codigo, temTransporte: !!s.transporte }; }
+      _diag: function () { return { ultimaBatida: s.ultimaBatida, agora: agora(), idAdversario: idAdversario(), batidasRecebidas: s.batidasRecebidas || 0, batidasEnviadas: s.batidasEnviadas || 0, relogios: s.relogios.length, codigo: s.codigo, temTransporte: !!s.transporte, chatPronto: !!s.chaveChat, chatRejeitadas: s.chatRejeitadas }; }
     };
     return api;
   }
 
   var OncaOnline = {
     PREFIXO: PREFIXO, ALFABETO: ALFABETO, SERVIDORES: SERVIDORES,
+    EXPIRA_RETIDO_SEG: EXPIRA_RETIDO_SEG, EXPIRA_MSG_SEG: EXPIRA_MSG_SEG, LIMITE_CHAT: LIMITE_CHAT,
     gerarCodigo: gerarCodigo, gerarId: gerarId, normalizarCodigo: normalizarCodigo, codigoValido: codigoValido,
-    formatarCodigo: formatarCodigo, oposto: oposto, casaTopico: casaTopico,
+    formatarCodigo: formatarCodigo, oposto: oposto, casaTopico: casaTopico, limparTexto: limparTexto,
+    criptoDisponivel: criptoDisponivel, paraB64: paraB64, deB64: deB64,
     criarTransporteMqtt: criarTransporteMqtt, criarBrokerMemoria: criarBrokerMemoria, criarSala: criarSala,
     carregarMqtt: carregarMqtt
   };

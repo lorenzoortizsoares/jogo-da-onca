@@ -70,14 +70,11 @@ const ROT_BANDEJA = -Math.PI / 2;        // cachorros capturados olham para o ta
 // ---------------------------------------------------------------- câmera
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
 const controls = new OrbitControls(cam, canvas);
+// pedido do usuário: só 3 visões fixas (botão Câmera), sem girar arrastando e sem zoom
+controls.enabled = false;
+controls.enableRotate = false;
+controls.enableZoom = false;
 controls.enablePan = false;
-controls.enableDamping = true;
-controls.dampingFactor = 0.12;
-controls.minZoom = 0.7;
-controls.maxZoom = 3;
-controls.minPolarAngle = THREE.MathUtils.degToRad(15);
-controls.maxPolarAngle = THREE.MathUtils.degToRad(75);
-controls.rotateSpeed = 0.8;
 
 const centro = new THREE.Box3().setFromPoints(board.fitPoints).getCenter(new THREE.Vector3());
 let sujo = true;
@@ -96,12 +93,21 @@ function margens() {
   const baixo = barra ? Math.max(0, h - barra.getBoundingClientRect().top + stage.getBoundingClientRect().top) : 0;
   return { topo, baixo };
 }
-// vista padrão (pedido do usuário, com imagem de referência): isométrico clássico em
-// todas as telas — tabuleiro em losango, uma quina apontando para quem joga.
-function vistaPadrao() {
-  const caesPerto = cfg.mode === 'ai' && cfg.humanSide === 'D';
-  return { az: caesPerto ? 225 : 45, el: 35.264 };
+// As 3 visões (pedido do usuário): "normal" = isométrico clássico da imagem de referência
+// (losango, quina apontando para quem joga); "oposta" = a mesma, do outro lado; "cima" = de cima.
+const VISTAS = ['normal', 'oposta', 'cima'];
+const NOME_VISTA = { normal: 'Visão normal', oposta: 'Visão do lado oposto', cima: 'Visão de cima' };
+let vistaAtual = 'normal';
+function caesPertoDoJogador() {
+  return (cfg.mode === 'ai' && cfg.humanSide === 'D') || (cfg.mode === 'online' && !!sala && sala.meuLado === 'D');
 }
+function anguloDaVista(nome) {
+  const perto = caesPertoDoJogador(), base = perto ? 225 : 45;
+  if (nome === 'oposta') return { az: base + 180, el: 35.264 };
+  if (nome === 'cima') return { az: perto ? 180 : 0, el: 89.9 };   // o lado de quem joga fica embaixo na tela
+  return { az: base, el: 35.264 };
+}
+function vistaPadrao() { return anguloDaVista(vistaAtual); }
 function direcao(az, el) {
   const a = THREE.MathUtils.degToRad(az), e = THREE.MathUtils.degToRad(el);
   return new THREE.Vector3(Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a));
@@ -142,7 +148,10 @@ function recentrar(suave) {
   if (!suave) { cam.zoom = 1; enquadrar(direcao(v.az, v.el)); return; }
   const a = anguloAtual();
   let daz = v.az - a.az; daz = ((daz + 540) % 360) - 180;   // caminho mais curto
-  animCam = { t0: performance.now(), dur: 650, az0: a.az, el0: a.el, daz, del: v.el - a.el, z0: cam.zoom };
+  const anim = { t0: performance.now(), dur: 650, az0: a.az, el0: a.el, daz, del: v.el - a.el, z0: cam.zoom };
+  animCam = anim;
+  // mesma garantia da REG-001: sem quadros de animação, a câmera chega à visão mesmo assim
+  setTimeout(() => { if (animCam === anim) { animCam = null; cam.zoom = 1; enquadrar(direcao(v.az, v.el)); } }, anim.dur + 150);
 }
 function passoAnimCam(t) {
   if (!animCam) return false;
@@ -298,6 +307,8 @@ function atualizarHud() {
   $('btnParar').hidden = !cadeia || ocupado;
   $('btnDesfazer').disabled = !podeDesfazer();
   $('btnDesfazer').hidden = cfg.mode === 'online';
+  $('miniChat').hidden = cfg.mode !== 'online';
+  $('telaPartida').classList.toggle('online', cfg.mode === 'online');
   $('btnReiniciar').hidden = cfg.mode === 'online';
   $('btnSairSala').hidden = cfg.mode !== 'online';
   const n = S.captured;
@@ -558,15 +569,21 @@ function atualizarEscolha() {
 function irParaEscolha(modo) { cfg.mode = modo; atualizarEscolha(); mostrarTela('telaEscolha'); }
 function comecar(estado) {
   mostrarTela('telaPartida');
-  cam.zoom = 1;
+  cam.zoom = 1; vistaAtual = 'normal';
   recentrar(false);
   novaPartida(estado);
 }
+function trocarVista() {
+  vistaAtual = VISTAS[(VISTAS.indexOf(vistaAtual) + 1) % VISTAS.length];
+  recentrar(true);
+  toast(NOME_VISTA[vistaAtual]);
+}
 function abrir(id) { $(id).hidden = false; const b = $(id).querySelector('button'); if (b) b.focus(); }
-function fecharSobreposicoes() { ['menu', 'regras'].forEach((id) => { $(id).hidden = true; }); }
+function fecharSobreposicoes() { ['menu', 'regras', 'chat'].forEach((id) => { $(id).hidden = true; }); }
 function irParaInicio() {
   pedido++; ocupado = false; fecharSobreposicoes(); fecharAviso(); $('vitoria').hidden = true;
   if (sala) { sala.sair(); sala = null; esquecerSessao(); }
+  limparChat();   // privacidade: o chat some do aparelho quando a sala acaba
   mostrarTela('telaInicio');
 }
 
@@ -628,6 +645,8 @@ function novaSessao() {
   });
   s.on('resposta-revanche', ({ aceitar }) => { if (s === sala && !aceitar) mostrarAviso({ titulo: 'Sem revanche', texto: 'Seu adversário não quis jogar de novo agora.' }); });
   s.on('saiu', () => { if (s === sala) mostrarAviso({ titulo: 'Seu adversário saiu', texto: 'A partida online terminou.', sim: 'Ir para o início', aoSim: irParaInicio }); });
+  s.on('chat', (m) => { if (s === sala) adicionarChat(m); });
+  limparChat();
   sala = s;
   return s;
 }
@@ -639,8 +658,8 @@ async function aoEstadoOnline({ msg }) {
     partidaOnline = msg.partida; seqOnline = msg.seq;
     fecharAviso(); $('vitoria').hidden = true;
     guardarSessao(); marcarUrlSala();
-    if ($('telaPartida').hidden) { mostrarTela('telaPartida'); cam.zoom = 1; recentrar(false); }
-    else recentrar(true);
+    if ($('telaPartida').hidden) { mostrarTela('telaPartida'); cam.zoom = 1; vistaAtual = 'normal'; recentrar(false); }
+    else { vistaAtual = 'normal'; recentrar(true); }
     novaPartida(L.cloneState(msg.estado));
     return;
   }
@@ -714,6 +733,42 @@ async function compartilharConvite() {
   catch (e) { toast(`Código da sala: ${ON.formatarCodigo(sala.codigo)}`); }
 }
 
+// ---- chat (só no online). Histórico só na memória: some ao sair da sala ou recarregar.
+let historicoChat = [];
+function linhaChat(m) {
+  const p = document.createElement('p');
+  p.className = 'msg' + (m.meu ? ' meu' : '');
+  const b = document.createElement('b');
+  b.textContent = `${NOME[m.lado] || '?'}${m.meu ? ' (você)' : ''}: `;
+  const t = document.createElement('span');
+  t.textContent = m.texto;                         // sempre texto puro: nunca vira HTML
+  p.append(b, t);
+  return p;
+}
+function renderChat() {
+  $('miniLista').replaceChildren(...historicoChat.slice(-4).map(linhaChat));
+  const lista = $('chatLista');
+  lista.replaceChildren(...historicoChat.map(linhaChat));
+  lista.scrollTop = lista.scrollHeight;
+}
+function adicionarChat(m) {
+  historicoChat.push(m);
+  if (historicoChat.length > 300) historicoChat.shift();
+  renderChat();
+}
+function limparChat() { historicoChat = []; $('chatTexto').value = ''; $('chatErro').hidden = true; renderChat(); }
+function abrirChat() { abrir('chat'); renderChat(); setTimeout(() => $('chatTexto').focus(), 30); }
+$('miniChat').onclick = abrirChat;
+$('miniChat').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrirChat(); } });
+$('chatForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!sala) return;
+  const r = await sala.enviarChat($('chatTexto').value);
+  const msgErro = { chave: 'O chat ainda está conectando… tente de novo em instantes.', longo: 'Mensagem muito longa (máximo 200 caracteres).', 'sem-cripto': 'Este navegador não permite chat criptografado.', erro: 'Não consegui enviar. Tente de novo.' };
+  if (r.ok) { $('chatTexto').value = ''; $('chatErro').hidden = true; }
+  else if (r.motivo !== 'vazio') { $('chatErro').textContent = msgErro[r.motivo] || 'Não consegui enviar.'; $('chatErro').hidden = false; }
+});
+
 $('btnModoOnline').onclick = () => irParaOnline('menu');
 $('btnRetomar').onclick = () => { const s = sessaoSalva(); if (s) { irParaOnline('entrar'); $('campoCodigo').value = ON.formatarCodigo(s.codigo); buscarSala(s.codigo); } };
 $('btnCriarSala').onclick = () => etapaOnline('criar');
@@ -762,13 +817,41 @@ $('btnTrocar').onclick = () => {
 };
 $('btnDesfazer').onclick = desfazer;
 $('btnParar').onclick = encerrarCadeia;
-$('btnCamera').onclick = () => recentrar(true);
+$('btnCamera').onclick = trocarVista;
+// ---- som ambiente de floresta (gravação real escolhida pelo usuário em assets/sons/ambiente.mp3)
+// Toca em laço, bem baixinho, em todas as telas; segue o botão Som; pausa com a aba escondida.
+const AMBIENTE_VOLUME = 0.22;
+const ambiente = new Audio();
+ambiente.loop = true; ambiente.preload = 'none'; ambiente.volume = 0;
+ambiente.src = 'assets/sons/ambiente.mp3';
+let ambienteLiberado = false, timerFade = 0;
+ambiente.addEventListener('error', () => { ambienteLiberado = false; });   // sem arquivo: o jogo segue sem ambiente
+function atualizarAmbiente() {
+  const tocar = ambienteLiberado && !!audio && !audio.isMuted() && !document.hidden;
+  clearInterval(timerFade);
+  if (tocar) {
+    if (ambiente.paused) { const p = ambiente.play(); if (p && p.catch) p.catch(() => {}); }
+    timerFade = setInterval(() => {                         // entra devagar (~2 s)
+      ambiente.volume = Math.min(AMBIENTE_VOLUME, ambiente.volume + AMBIENTE_VOLUME / 20);
+      if (ambiente.volume >= AMBIENTE_VOLUME) clearInterval(timerFade);
+    }, 100);
+  } else {
+    ambiente.volume = 0;
+    if (!ambiente.paused) ambiente.pause();
+  }
+}
+// navegadores só deixam tocar som depois do primeiro toque do usuário
+const liberarAmbiente = () => { if (!ambienteLiberado && !SELFTEST) { ambienteLiberado = true; atualizarAmbiente(); } };
+document.addEventListener('pointerdown', liberarAmbiente, { capture: true });
+document.addEventListener('keydown', liberarAmbiente, { capture: true });
+document.addEventListener('visibilitychange', atualizarAmbiente);
+
 function atualizarBotaoSom() {
   const mudo = audio ? audio.isMuted() : true;
   $('btnSom').setAttribute('aria-pressed', String(!mudo));
   $('btnSom').querySelector('span').textContent = mudo ? 'Sem som' : 'Som';
 }
-$('btnSom').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarBotaoSom(); if (!audio.isMuted()) som('toc', 0.8); };
+$('btnSom').onclick = () => { if (!audio) return; som('unlock'); audio.setMuted(!audio.isMuted()); atualizarBotaoSom(); atualizarAmbiente(); if (!audio.isMuted()) som('toc', 0.8); };
 atualizarBotaoSom();
 
 // ---------------------------------------------------------------- ganchos de teste
@@ -868,6 +951,18 @@ async function autoteste() {
     check('início: texto da vez (2 jogadores)', $('status').textContent === 'Vez do Jogador 1 (Onça)', $('status').textContent);
     check('início: canvas desenhou', renderer.info.render.calls > 0, renderer.info.render.calls);
 
+    // câmera: só 3 visões fixas pelo botão; arrastar não gira e a roda/pinça não aproxima
+    const p0 = cam.position.clone(), z0 = cam.zoom;
+    const ev = (tipo, x, y, extra) => canvas.dispatchEvent(new PointerEvent(tipo, Object.assign({ clientX: x, clientY: y, bubbles: true, pointerId: 7, pointerType: 'mouse', isPrimary: true }, extra)));
+    ev('pointerdown', 150, 300, { button: 0, buttons: 1 }); ev('pointermove', 330, 380, { buttons: 1 }); ev('pointerup', 330, 380, { button: 0 });
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, clientX: 200, clientY: 300, bubbles: true, cancelable: true }));
+    await dormir(120);
+    check('câmera: arrastar não gira e a roda do mouse não aproxima', cam.position.distanceTo(p0) < 1e-6 && cam.zoom === z0 && vistaAtual === 'normal');
+    const vistas = [];
+    for (let k = 0; k < 3; k++) { $('btnCamera').click(); await dormir(900); vistas.push([vistaAtual, Math.round(anguloAtual().el)]); }
+    check('câmera: botão alterna normal → lado oposto → de cima → normal', JSON.stringify(vistas) === JSON.stringify([['oposta', 35], ['cima', 90], ['normal', 35]]), vistas);
+    check('câmera: aviso com o nome da visão', !$('toast').hidden && $('toast').textContent === 'Visão normal', $('toast').textContent);
+
     // onça anda 12 -> 17
     clicarPonto(12); clicarPonto(17); await ocioso();
     check('onça anda com cliques (12 -> 17)', S.jaguar === 17 && S.turn === 'D' && perto(puma, 17), { jaguar: S.jaguar, turn: S.turn });
@@ -962,6 +1057,35 @@ async function autoteste() {
     check('REG-006 adversário aparece conectado logo ao começar (criador e convidado)', sala.adversarioOnline && conv.adversarioOnline && $('vez').dataset.rede === 'on',
       { eu: sala._diag(), conv: conv._diag() });
     check('online: sem botão Desfazer', $('btnDesfazer').hidden && !podeDesfazer());
+
+    // CHAT criptografado de ponta a ponta
+    await esperar(() => sala.chatPronto && conv.chatPronto, 3000);
+    check('chat: chave secreta combinada nos dois celulares', sala.chatPronto && conv.chatPronto, { eu: sala._diag(), conv: conv._diag() });
+    check('chat: caixinha aparece no canto inferior esquerdo', !$('miniChat').hidden && (() => { const r = $('miniChat').getBoundingClientRect(); return r.left < 40 && r.bottom > window.innerHeight * 0.6; })());
+    const recebidasRobo = [];
+    conv.on('chat', (m) => { if (!m.meu) recebidasRobo.push(m); });
+    $('miniChat').click(); await dormir(60);
+    check('chat: tocar na caixinha abre o chat completo', !$('chat').hidden);
+    $('chatTexto').value = 'Boa sorte!'; $('chatForm').requestSubmit();
+    await esperar(() => recebidasRobo.length === 1, 3000);
+    check('chat: minha mensagem chega decifrada no outro celular', recebidasRobo.length === 1 && recebidasRobo[0].texto === 'Boa sorte!' && recebidasRobo[0].lado === 'J', recebidasRobo);
+    const noServidor = broker.publicacoes.filter((p) => p.topico.endsWith('/chat'));
+    check('cripto: no servidor só passa texto embaralhado (sem o texto, sem nomes)', noServidor.length >= 1 && noServidor.every((p) => {
+      const bruto = JSON.stringify(p.msg);
+      return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
+    }), noServidor.map((p) => p.msg));
+    await conv.enviarChat('<img src=x onerror="window.__xss=1"><b>oi</b>');
+    await esperar(() => historicoChat.length === 2, 3000);
+    check('segurança: texto com código vira só texto (nada é executado)', !document.querySelector('#miniChat img, #chatLista img, #chatLista b b') && !window.__xss && $('chatLista').textContent.includes('<img src=x'), $('chatLista').textContent);
+    for (let k = 1; k <= 4; k++) await conv.enviarChat('msg ' + k);
+    await esperar(() => historicoChat.length === 6, 3000);
+    check('chat: a caixinha mostra só as últimas 4; o chat completo mostra todas', $('miniLista').children.length === 4 && $('chatLista').children.length === 6, [$('miniLista').children.length, $('chatLista').children.length]);
+    check('chat: nome Onça/Cachorros em cada mensagem', $('miniLista').lastElementChild.textContent === 'Cachorros: msg 4' && $('chatLista').firstElementChild.textContent === 'Onça (você): Boa sorte!', [$('miniLista').lastElementChild.textContent, $('chatLista').firstElementChild.textContent]);
+    check('chat: mensagem longa demais é recusada', (await sala.enviarChat('x'.repeat(ON.LIMITE_CHAT + 1))).motivo === 'longo');
+    check('REG-002 layout: chat completo cabe na tela', vazamentos().length === 0, vazamentos());
+    $('chat').querySelector('[data-fechar]').click(); await dormir(30);
+    check('chat: fechar volta para o jogo com a caixinha visível', $('chat').hidden && !$('miniChat').hidden);
+    check('privacidade: tudo o que fica guardado no servidor tem validade', broker.publicacoes.filter((p) => p.opcoes.reter && p.msg).every((p) => p.opcoes.expiraSeg > 0 && p.opcoes.expiraSeg <= ON.EXPIRA_RETIDO_SEG));
     check('REG-002 layout: partida online cabe na tela', vazamentos().length === 0, vazamentos());
     check('REG-003 texto da vez inteiro (online)', !cortado(), $('status').textContent);
     // meu lance chega ao adversário
@@ -1006,6 +1130,10 @@ async function autoteste() {
     check('online: aviso quando o adversário sai', !$('avisoOnline').hidden && /saiu/.test($('avisoTitulo').textContent), $('avisoTitulo').textContent);
     $('avisoSim').click(); await dormir(30);
     check('online: "Ir para o início" fecha a sala', !$('telaInicio').hidden && sala === null);
+    check('privacidade: ao sair, o chat some do aparelho', historicoChat.length === 0 && $('chatLista').children.length === 0 && $('miniLista').children.length === 0);
+    await dormir(50);
+    const sobras = Object.keys(broker.retidos).filter((k) => k.indexOf(ON.PREFIXO + codigo + '/') === 0);
+    check('privacidade: ao sair, nada da sala fica guardado no servidor', sobras.length === 0, sobras);
     // entrar pelo código: código inválido avisa
     irParaOnline('entrar'); $('campoCodigo').value = 'XX'; $('btnBuscarSala').click(); await dormir(30);
     check('online: código inválido mostra aviso', !$('erroOnline').hidden && /inválido/.test($('erroOnline').textContent), $('erroOnline').textContent);
