@@ -4,7 +4,7 @@
 # Saída: testes\relatorios\ultimo-relatorio.md (+ prints em testes\relatorios\prints)
 # Código de saída: 0 = tudo passou, 1 = alguma falha.
 # =====================================================================
-param([switch]$SemPrints, [switch]$Completo)
+param([switch]$SemPrints, [switch]$Completo, [switch]$ServidorReal)
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -36,6 +36,44 @@ function Rodar-Chrome([string[]]$argumentos) {
   return ''
 }
 function Chrome-Dom($url, $janela, $tempo) { Rodar-Chrome @("--window-size=$janela", "--virtual-time-budget=$tempo", '--dump-dom', $url) }
+
+# Tempo REAL (para testes que usam a internet): o "tempo virtual" corre mais rápido que a rede
+# (falha REG-007). Abre o Chrome com depuração remota e lê o texto de um elemento até aparecer a marca de fim.
+function Chrome-TempoReal($url, $idElemento, $marcaFim, $limiteSeg) {
+  $porta = Get-Random -Minimum 9300 -Maximum 9900
+  $perfilCdp = Join-Path $env:TEMP ('onca-cdp-' + $porta)
+  $proc = Start-Process -FilePath $chrome -ArgumentList @('--headless=new', "--user-data-dir=$perfilCdp", "--remote-debugging-port=$porta", '--remote-allow-origins=*', 'about:blank') -PassThru -WindowStyle Hidden
+  $texto = ''
+  try {
+    $alvo = $null
+    for ($i = 0; $i -lt 60 -and -not $alvo; $i++) {
+      Start-Sleep -Milliseconds 250
+      try { $alvo = Invoke-RestMethod -Method Put -Uri ("http://127.0.0.1:$porta/json/new?" + $url) -TimeoutSec 2 } catch { }
+    }
+    if (-not $alvo) { return 'ERRO: não consegui controlar o Chrome' }
+    $ws = New-Object System.Net.WebSockets.ClientWebSocket
+    $ws.ConnectAsync([Uri]$alvo.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait()
+    $fim = (Get-Date).AddSeconds($limiteSeg); $n = 0
+    while ((Get-Date) -lt $fim) {
+      Start-Sleep -Milliseconds 800
+      $n++
+      $expr = "(document.getElementById('$idElemento')||{}).textContent||''"
+      $pedido = @{ id = $n; method = 'Runtime.evaluate'; params = @{ expression = $expr; returnByValue = $true } } | ConvertTo-Json -Compress -Depth 5
+      $b = [System.Text.Encoding]::UTF8.GetBytes($pedido)
+      $ws.SendAsync((New-Object 'System.ArraySegment[byte]' (,$b)), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).Wait()
+      $resp = New-Object System.IO.MemoryStream
+      do {
+        $buf = New-Object byte[] 65536
+        $r = $ws.ReceiveAsync((New-Object 'System.ArraySegment[byte]' (,$buf)), [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $resp.Write($buf, 0, $r.Count)
+      } while (-not $r.EndOfMessage)
+      $json = [System.Text.Encoding]::UTF8.GetString($resp.ToArray()) | ConvertFrom-Json
+      if ($json.id -eq $n -and $json.result -and $json.result.result) { $texto = [string]$json.result.result.value; if ($texto -match $marcaFim) { break } }
+    }
+  } catch { $texto += "`nERRO: $($_.Exception.Message)" }
+  finally { if ($proc) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 300; Remove-Item $perfilCdp -Recurse -Force -ErrorAction SilentlyContinue }
+  return $texto
+}
 function Chrome-Print($url, $janela, $arquivo) { Rodar-Chrome @('--hide-scrollbars', "--window-size=$janela", '--virtual-time-budget=20000', "--screenshot=$arquivo", $url) | Out-Null }
 function Decodificar($t) { [System.Net.WebUtility]::HtmlDecode(($t -replace '<[^>]+>', '')) }
 
@@ -63,6 +101,23 @@ $okLogica = $res.Success -and ([int]$res.Groups[2].Value -eq 0) -and $terminou
 $det = if ($res.Success) { "$($res.Groups[1].Value) passaram, $($res.Groups[2].Value) falharam" + $(if (-not $terminou) { ' (testes assíncronos não terminaram)' } else { '' }) } else { 'sem resultado (a página não rodou)' }
 if ($falhasLogica) { $det += "`n$falhasLogica" }
 Registrar 'Back end: regras e computador (testes-logica.html)' $okLogica $det
+
+# 2b) online: protocolo da sala com servidor simulado (sem internet)
+$dom = Chrome-Dom (Url 'testes\online\testes-online.html') '1000,800' 120000
+$txt = Decodificar ([regex]::Match($dom, '(?s)<pre id="out"[^>]*>(.*?)</pre>').Groups[1].Value)
+$res = [regex]::Match($txt, 'RESUMO: (\d+) passaram, (\d+) falharam')
+$okOn = $res.Success -and ([int]$res.Groups[2].Value -eq 0) -and ($txt -match '\[FIM\]')
+$det = if ($res.Success) { "$($res.Groups[1].Value) passaram, $($res.Groups[2].Value) falharam" } else { 'sem resultado (a página não rodou)' }
+$falhasOn = ($txt -split "`n" | Where-Object { $_ -match '^FAIL' }) -join "`n"
+if ($falhasOn) { $det += "`n$falhasOn" }
+Registrar 'Online: protocolo da sala (testes-online.html, servidor simulado)' $okOn $det
+
+# 2c) opcional: online com os servidores públicos de verdade (usa a internet, tempo real)
+if ($ServidorReal -or $Completo) {
+  $t = Chrome-TempoReal ((Url 'testes\online\teste-servidor-real.html')) 'out' '\[FIM' 90
+  $res = [regex]::Match($t, 'RESUMO: (\d+) passaram, (\d+) falharam')
+  Registrar 'Online: servidores públicos reais (principal e reserva)' ($res.Success -and [int]$res.Groups[2].Value -eq 0 -and $t -match '\[FIM') $t
+}
 
 # 3) front end: autoteste da interface (computador e celular)
 function Autoteste($nome, $url, $janela) {

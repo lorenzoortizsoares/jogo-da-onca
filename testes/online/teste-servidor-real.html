@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Teste com o servidor público real</title></head>
+<body>
+<pre id="out">rodando…</pre>
+<script src="../../codigo/logica.js"></script>
+<script src="../../codigo/online.js"></script>
+<script>
+// Usa a internet: dois "jogadores" na mesma página conversam pelo servidor público de verdade.
+// Também testa o servidor de reserva (simulando o principal fora do ar).
+(function () {
+  var L = window.OncaLogic, ON = window.OncaOnline;
+  var linhas = [], ok = 0, falhas = 0, t0 = Date.now();
+  function registrar(nome, cond, info) { if (cond) ok++; else falhas++; linhas.push((cond ? 'PASS  ' : 'FAIL  ') + nome + (info !== undefined ? '  -- ' + JSON.stringify(info) : '')); }
+  function mostrar(fim) { document.getElementById('out').textContent = 'RESUMO: ' + ok + ' passaram, ' + falhas + ' falharam' + (fim ? '  [FIM em ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s]' : '') + '\n' + linhas.join('\n'); }
+  function esperar(cond, ms) { var t = Date.now(); return new Promise(function (r) { (function p() { if (cond() || Date.now() - t > ms) r(cond()); else setTimeout(p, 50); })(); }); }
+  var foraDoAr = { conectar: function () { return Promise.reject(new Error('fora do ar (simulado)')); }, publicar: function () {}, assinar: function () {}, aoMensagem: function () {}, aoConexao: function () {}, desconectar: function () {} };
+
+  async function rodada(nome, fabrica, servidorEsperado) {
+    var A = ON.criarSala({ id: ON.gerarId(), criarTransporte: fabrica, initialState: function () { return L.initialState(); } });
+    var B = ON.criarSala({ id: ON.gerarId(), criarTransporte: fabrica, initialState: function () { return L.initialState(); } });
+    try {
+      var ti = Date.now();
+      var r = await A.criar('J');
+      registrar(nome + ': criar sala (' + (Date.now() - ti) + ' ms)', !!r.codigo && A.servidor === servidorEsperado, { servidor: A.servidor });
+      ti = Date.now();
+      var c = await B.consultar(r.codigo);
+      registrar(nome + ': achar a sala pelo código (' + (Date.now() - ti) + ' ms)', c.existe && c.meuLado === 'D', { existe: c.existe, servidor: B.servidor });
+      ti = Date.now();
+      await B.entrar(12000);
+      await esperar(function () { return A.estado && B.estado; }, 8000);
+      registrar(nome + ': entrar e começar (' + (Date.now() - ti) + ' ms)', !!(A.estado && B.estado && B.meuLado === 'D'));
+      ti = Date.now();
+      A.jogar({ type: 'step', from: 12, to: 17 }, L.applyJaguarStep(L.initialState(), 17));
+      await esperar(function () { return B.estado && B.estado.seq === 1; }, 8000);
+      registrar(nome + ': lance chega ao outro celular (' + (Date.now() - ti) + ' ms)', !!(B.estado && B.estado.seq === 1 && B.estado.lance.to === 17));
+      await esperar(function () { return A.adversarioOnline && B.adversarioOnline; }, 5000);
+      registrar(nome + ': presença dos dois lados', A.adversarioOnline && B.adversarioOnline);
+    } catch (e) {
+      registrar(nome + ': erro ' + (e && e.message), false);
+    }
+    B.sair(); A.sair();
+  }
+
+  (async function () {
+    await rodada('principal', function (i) { return ON.criarTransporteMqtt(ON.SERVIDORES[i]); }, 0);
+    await rodada('reserva (principal fora do ar)', function (i) { return i === 0 ? foraDoAr : ON.criarTransporteMqtt(ON.SERVIDORES[i]); }, 1);
+    mostrar(true);
+  })();
+  mostrar(false);
+})();
+</script>
+</body>
+</html>

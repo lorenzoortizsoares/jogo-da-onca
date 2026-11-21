@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Testes do modo online</title></head>
+<body>
+<pre id="out">rodando…</pre>
+<script src="../../codigo/logica.js"></script>
+<script src="../../codigo/online.js"></script>
+<script>
+// Testes do protocolo online com um servidor simulado (em memória): sem internet, determinístico.
+(function () {
+  var L = window.OncaLogic, ON = window.OncaOnline;
+  var linhas = [], ok = 0, falhas = 0;
+  function registrar(nome, cond, info) {
+    if (cond) ok++; else falhas++;
+    linhas.push((cond ? 'PASS  ' : 'FAIL  ') + nome + (info !== undefined && !cond ? '  -- ' + JSON.stringify(info) : ''));
+  }
+  function mostrar(fim) {
+    document.getElementById('out').textContent = 'RESUMO: ' + ok + ' passaram, ' + falhas + ' falharam' + (fim ? '  [FIM]' : '') + '\n' + linhas.join('\n');
+  }
+  var dormir = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  function esperar(cond, ms) {
+    var t0 = Date.now();
+    return new Promise(function (resolve) {
+      (function passo() { if (cond() || Date.now() - t0 > ms) resolve(cond()); else setTimeout(passo, 10); })();
+    });
+  }
+  function nova(broker, id) {
+    return ON.criarSala({ id: id, criarTransporte: function () { return broker.criarTransporte(); }, initialState: function () { return L.initialState(); },
+      batidaMs: 100, ausenciaMs: 450, esperaSalaMs: 200 });
+  }
+
+  // ---- códigos
+  var todosValidos = true, rng = 0.123;
+  for (var i = 0; i < 2000; i++) { var c = ON.gerarCodigo(); if (!ON.codigoValido(c)) todosValidos = false; }
+  registrar('código: 2000 códigos gerados são válidos (6 caracteres, sem 0/O/1/I/L)', todosValidos);
+  registrar('código: normaliza "k7m-4qx" para "K7M4QX"', ON.normalizarCodigo(' k7m-4qx ') === 'K7M4QX');
+  registrar('código: rejeita curto, longo e caracteres ambíguos', !ON.codigoValido('ABC') && !ON.codigoValido('ABCDEFG') && !ON.codigoValido('ABCD0O') && !ON.codigoValido('ABCDI1'));
+  registrar('código: formata com hífen', ON.formatarCodigo('K7M4QX') === 'K7M-4QX');
+  registrar('tópico: curingas MQTT (+ e #)', ON.casaTopico('a/+/c', 'a/b/c') && ON.casaTopico('a/#', 'a/b/c') && !ON.casaTopico('a/+', 'a/b/c') && !ON.casaTopico('a/b', 'a/c'));
+
+  (async function () {
+    try {
+      var b = ON.criarBrokerMemoria();
+      var A = nova(b, 'jogA'), B = nova(b, 'jogB'), C = nova(b, 'jogC');
+      var r = await A.criar('J');
+      registrar('criar: sala nasce aguardando, criador é a Onça', A.info.status === 'aguardando' && A.meuLado === 'J' && A.papel === 'criador');
+      var cons = await B.consultar(r.codigo.toLowerCase());
+      registrar('consultar: convidado vê a sala e fica com os Cachorros', cons.existe && cons.status === 'aguardando' && cons.ladoCriador === 'J' && cons.meuLado === 'D' && !cons.cheia, cons);
+      await B.entrar(1500);
+      await esperar(function () { return A.estado && B.estado; }, 500);
+      registrar('entrar: os dois recebem a partida 1, seq 0, posição inicial', A.estado && B.estado && A.estado.partida === 1 && B.estado.seq === 0 && L.positionKey(B.estado.estado) === L.positionKey(L.initialState()));
+      registrar('entrar: lados corretos (A=Onça, B=Cachorros)', A.meuLado === 'J' && B.meuLado === 'D' && B.papel === 'convidado');
+      await esperar(function () { return A.adversarioOnline && B.adversarioOnline; }, 60);
+      registrar('REG-006: os dois se veem conectados logo ao entrar (antes da batida periódica)', A.adversarioOnline && B.adversarioOnline, { A: A._diag(), B: B._diag() });
+
+      var cons3 = await C.consultar(r.codigo);
+      registrar('terceira pessoa: vê "sala cheia"', cons3.existe && cons3.cheia === true, cons3);
+      var cheia = false; try { await C.entrar(400); } catch (e) { cheia = /cheia|respondeu/.test(e.message); }
+      registrar('terceira pessoa: não consegue entrar', cheia);
+      C.fechar();
+
+      // lances
+      var s1 = L.applyJaguarStep(A.estado.estado, 17);
+      A.jogar({ type: 'step', from: 12, to: 17 }, s1);
+      await esperar(function () { return B.estado.seq === 1; }, 500);
+      registrar('lance: chega ao adversário com seq 1 e o lance para animar', B.estado.seq === 1 && B.estado.lance.to === 17 && B.estado.autor === 'jogA');
+      var conferido = L.positionKey(L.applyMove(L.initialState(), B.estado.lance)) === L.positionKey(B.estado.estado);
+      registrar('lance: o lance recebido reproduz o estado recebido', conferido);
+
+      // estranho tentando publicar um estado é ignorado
+      var falso = b.criarTransporte();
+      falso.publicar(ON.PREFIXO + r.codigo + '/estado', { partida: 1, seq: 50, estado: L.initialState(), lance: null, autor: 'intruso' }, { reter: true });
+      await dormir(40);
+      registrar('segurança: estado publicado por estranho é ignorado', A.estado.seq === 1 && B.estado.seq === 1);
+      falso.publicar(ON.PREFIXO + r.codigo + '/estado', { partida: 1, seq: 1, estado: s1, lance: { type: 'step', from: 12, to: 17 }, autor: 'jogA' }, { reter: true });   // restaura o retido
+
+      // queda e volta (testamento)
+      B._transporte().cair();
+      await esperar(function () { return !A.adversarioOnline; }, 400);
+      registrar('queda: o outro lado percebe na hora (testamento)', !A.adversarioOnline);
+      B._transporte().voltar();
+      await esperar(function () { return A.adversarioOnline; }, 400);
+      registrar('volta: o outro lado vê que voltou', A.adversarioOnline);
+
+      // sumiço sem testamento: detectado pela falta de batidas
+      var tB = B._transporte(); B.fechar();
+      await esperar(function () { return !A.adversarioOnline; }, 1500);
+      registrar('sumiço: sem batidas por um tempo = desconectado', !A.adversarioOnline);
+
+      // recarregar a página (mesmo id) volta para a mesma sala e partida
+      var B2 = nova(b, 'jogB');
+      var rec = await B2.reconectar(r.codigo);
+      await esperar(function () { return B2.estado && B2.estado.seq === 1; }, 500);
+      registrar('reconectar: mesmo aparelho volta como Cachorros na mesma partida', rec.ok && B2.meuLado === 'D' && B2.estado && B2.estado.seq === 1, rec);
+      await esperar(function () { return A.adversarioOnline; }, 400);
+      registrar('reconectar: o outro lado vê que voltou', A.adversarioOnline);
+
+      // revanche trocando de lado (B2 pede, A aceita)
+      var pedidoVisto = null; A.on('pedido-revanche', function (p) { pedidoVisto = p; });
+      B2.pedirRevanche(true);
+      await esperar(function () { return pedidoVisto; }, 400);
+      registrar('revanche: o pedido chega com "trocar lados"', pedidoVisto && pedidoVisto.trocar === true);
+      A.responderRevanche(true, true);
+      await esperar(function () { return B2.estado && B2.estado.partida === 2 && B2.meuLado === 'J'; }, 500);
+      registrar('revanche: partida 2 com lados trocados (A=Cachorros, B=Onça)', A.estado.partida === 2 && B2.estado.partida === 2 && A.meuLado === 'D' && B2.meuLado === 'J' && B2.estado.seq === 0);
+
+      // recusa
+      var resposta = null; B2.on('resposta-revanche', function (x) { resposta = x; });
+      B2.pedirRevanche(false); await dormir(30); A.responderRevanche(false);
+      await esperar(function () { return resposta; }, 400);
+      registrar('revanche: recusa chega como "não"', resposta && resposta.aceitar === false && A.estado.partida === 2);
+
+      // sair
+      var saiu = false; A.on('saiu', function () { saiu = true; });
+      B2.sair();
+      await esperar(function () { return saiu; }, 400);
+      registrar('sair: o outro lado é avisado', saiu && !A.adversarioOnline);
+      A.fechar();
+
+      // sala inexistente e código inválido
+      var Z = nova(b, 'jogZ');
+      var nada = await Z.consultar('ZZZ999');
+      registrar('consultar: sala inexistente', nada.existe === false);
+      var inval = await Z.consultar('xx');
+      registrar('consultar: código inválido', inval.existe === false && inval.invalido === true);
+      Z.fechar();
+
+      // estado retido chegando antes da sala (ordem trocada) não se perde
+      var b2 = ON.criarBrokerMemoria();
+      var A2 = nova(b2, 'ordemA'), B3 = nova(b2, 'ordemB');
+      var r2 = await A2.criar('D'); await B3.consultar(r2.codigo); await B3.entrar(1000);
+      var B4 = nova(b2, 'ordemB');
+      var retidos = b2.retidos, chaveSala = ON.PREFIXO + r2.codigo + '/sala', chaveEstado = ON.PREFIXO + r2.codigo + '/estado';
+      var salaSalva = retidos[chaveSala]; delete retidos[chaveSala];           // simula: estado chega primeiro
+      var p4 = B4.consultar(r2.codigo);
+      await dormir(30); retidos[chaveSala] = salaSalva;
+      b2.criarTransporte().publicar(chaveSala, salaSalva, { reter: true });
+      await p4;
+      await esperar(function () { return B4.estado; }, 400);
+      registrar('ordem: estado que chega antes da sala é guardado e aplicado', !!B4.estado && B4.estado.partida === 1 && B4.meuLado === 'J', { lado: B4.meuLado, estado: !!B4.estado, chaveEstado: !!retidos[chaveEstado] });
+      A2.fechar(); B3.fechar(); B4.fechar();
+    } catch (e) {
+      registrar('exceção: ' + (e && e.stack || e), false);
+    }
+    mostrar(true);
+  })();
+  mostrar(false);
+})();
+</script>
+</body>
+</html>

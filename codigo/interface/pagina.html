@@ -48,8 +48,13 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         </button>
         <button type="button" class="btn btn-secundario btn-grande" id="btnModo2J">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><path d="M3 19c.6-3 2.6-5 5-5s4.4 2 5 5M11 19c.6-3 2.6-5 5-5s4.4 2 5 5"/></svg>
-          2 jogadores
+          2 jogadores (mesmo aparelho)
         </button>
+        <button type="button" class="btn btn-secundario btn-grande" id="btnModoOnline">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="7.5" height="14" rx="1.6"/><rect x="14" y="5" width="7.5" height="14" rx="1.6"/><path d="M10.5 12h3"/></svg>
+          Jogar online
+        </button>
+        <button type="button" class="btn btn-secundario" id="btnRetomar" hidden>Voltar para a sala online</button>
         <button type="button" class="btn btn-fantasma" data-abrir="regras">Regras</button>
       </div>
     </div>
@@ -105,6 +110,70 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         <button type="button" class="btn btn-primario btn-grande" id="btnComecar">Começar partida</button>
         <button type="button" class="btn btn-fantasma" id="btnVoltar">Voltar</button>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TELA: ONLINE ================= -->
+<section class="tela tela-online" id="telaOnline" aria-labelledby="tituloOnline" hidden>
+  <div class="cartao">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <h2 id="tituloOnline">Jogar online</h2>
+
+      <div data-etapa="menu">
+        <p class="nota">Cada pessoa joga no seu celular. Só 2 jogadores por sala.</p>
+        <div class="pilha">
+          <button type="button" class="btn btn-primario btn-grande" id="btnCriarSala">Criar sala</button>
+          <button type="button" class="btn btn-secundario btn-grande" id="btnIrEntrar">Entrar numa sala</button>
+        </div>
+      </div>
+
+      <div data-etapa="criar" hidden>
+        <p class="rotulo">Você joga com:</p>
+        <div class="opcoes-lado" role="radiogroup" aria-label="Você joga com">
+          <button type="button" class="lado" role="radio" data-lado-online="J" aria-checked="true">
+            <svg class="ico" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg>
+            <strong>Onça</strong><small>caça e captura</small>
+          </button>
+          <button type="button" class="lado" role="radio" data-lado-online="D" aria-checked="false">
+            <svg class="ico" viewBox="0 0 48 36" aria-hidden="true"><use href="#ico-cao"/></svg>
+            <strong>Cachorros</strong><small>cercam a onça</small>
+          </button>
+        </div>
+        <p class="nota">Quem entrar fica com o outro lado e confirma antes de começar.</p>
+        <div class="pilha"><button type="button" class="btn btn-primario btn-grande" id="btnConfirmarCriar">Criar sala</button></div>
+      </div>
+
+      <div data-etapa="aguardando" hidden>
+        <p class="rotulo">Código da sala</p>
+        <p class="codigo" id="codigoSala">———</p>
+        <p class="nota" id="notaAguardando">—</p>
+        <div class="pilha"><button type="button" class="btn btn-primario btn-grande" id="btnCompartilhar">Enviar convite</button></div>
+        <p class="espera"><span class="ponto-espera" aria-hidden="true"></span>Esperando a outra pessoa entrar…</p>
+      </div>
+
+      <div data-etapa="entrar" hidden>
+        <label class="rotulo" for="campoCodigo">Código da sala</label>
+        <input id="campoCodigo" class="campo-codigo" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="7" placeholder="ABC-234">
+        <div class="pilha"><button type="button" class="btn btn-primario btn-grande" id="btnBuscarSala">Entrar</button></div>
+      </div>
+
+      <div data-etapa="confirmar" hidden>
+        <p class="rotulo">Sala <span id="codigoConfirmar"></span></p>
+        <div class="confirmar-lados">
+          <p class="lado-info"><svg class="ico" id="icoLadoOutro" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg><span>A outra pessoa joga com <b id="ladoOutro">—</b>.</span></p>
+          <p class="lado-info voce"><svg class="ico" id="icoLadoMeu" viewBox="0 0 48 36" aria-hidden="true"><use href="#ico-cao"/></svg><span>Você joga com <b id="ladoMeu">—</b>.</span></p>
+        </div>
+        <div class="pilha"><button type="button" class="btn btn-primario btn-grande" id="btnAceitar">Aceitar e começar</button></div>
+      </div>
+
+      <div data-etapa="conectando" hidden>
+        <p class="espera"><span class="ponto-espera" aria-hidden="true"></span><span id="textoConectando">Conectando…</span></p>
+      </div>
+
+      <p class="nota erro" id="erroOnline" role="alert" hidden></p>
+      <div class="pilha"><button type="button" class="btn btn-fantasma" id="btnVoltarOnline">Voltar</button></div>
     </div>
   </div>
 </section>
@@ -173,6 +242,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
     <div class="cartao-corpo pilha">
       <button type="button" class="btn btn-primario btn-grande" data-fechar>Continuar partida</button>
       <button type="button" class="btn btn-secundario" id="btnReiniciar">Reiniciar partida</button>
+      <button type="button" class="btn btn-secundario" id="btnSairSala" hidden>Sair da sala online</button>
       <button type="button" class="btn btn-secundario" data-abrir="regras">Regras</button>
       <button type="button" class="btn btn-fantasma" id="btnInicioMenu">Voltar ao início</button>
     </div>
@@ -199,6 +269,23 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
   </div>
 </div>
 
+<!-- ================= AVISO ONLINE (revanche, saída) ================= -->
+<div class="sobre" id="avisoOnline" role="dialog" aria-modal="true" aria-labelledby="avisoTitulo" hidden>
+  <div class="gaveta">
+    <div class="band band-losango" aria-hidden="true"></div>
+    <div class="cartao-corpo">
+      <h2 id="avisoTitulo">—</h2>
+      <p class="nota" id="avisoTexto"></p>
+      <div class="pilha">
+        <button type="button" class="btn btn-primario btn-grande" id="avisoSim">OK</button>
+        <button type="button" class="btn btn-secundario" id="avisoNao">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
 <pre id="selftest-report" hidden></pre>
 
 <!-- módulos (scripts clássicos, definem variáveis globais) -->
@@ -210,6 +297,9 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
 </script>
 <script>
 {{audio.js}}
+</script>
+<script>
+{{online.js}}
 </script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">

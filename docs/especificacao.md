@@ -22,6 +22,18 @@
    barra de baixo (Desfazer, Câmera, Som, Menu). "Parar de capturar" aparece durante
    uma sequência de capturas. Fim de partida: Revanche, Trocar lados (2 jogadores), Início.
 
+## Online (cada um no seu celular, só 2 pessoas)
+- Início → "Jogar online" → **Criar sala** (quem cria escolhe Onça ou Cachorros) ou
+  **Entrar numa sala** (código de 6 caracteres, como `ABC-234`, ou link de convite).
+- Quem entra vê o lado de cada um e toca em **"Aceitar e começar"**.
+- Convite pelo botão "Enviar convite" (compartilhar do celular / copiar link).
+- Uma terceira pessoa vê "Essa sala já tem 2 jogadores".
+- **Sem desfazer** no online. Revanche e "Trocar lados" precisam do aceite do outro.
+- Avisos: adversário desconectado (na faixa da vez) e "Seu adversário saiu".
+- Recarregar a página volta para a mesma sala e partida.
+- Conexão sem conta: servidor MQTT público gratuito (HiveMQ) com reserva (EMQX);
+  só os lances trafegam.
+
 ## Regras
 - Tabuleiro de 31 pontos: grade 5×5 (alquerque) + toca triangular.
 - A onça começa no centro e joga primeiro; 14 cachorros nas 3 fileiras opostas à toca.
