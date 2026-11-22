@@ -162,6 +162,26 @@ function Autoteste($nome, $url, $janela) {
 Autoteste 'Front end: autoteste no computador (1400x900)' ((Url 'index.html') + '?selftest=1') '1400,900'
 Autoteste 'Front end: autoteste no celular (390x844)' ((Url 'testes\interface\moldura-celular.html') + '?q=selftest%3D1') '600,900'
 
+# 3b) robô testador (pedido do usuário): joga partidas inteiras sozinho pela interface — 2 jogadores,
+# contra o computador e online simulado (cai, volta, fecha o app, sai da sala) — e confere tudo a cada passo.
+# A semente muda a cada rodada (partidas diferentes); tudo vai para o catálogo testes\robo\CATALOGO.md.
+# Achou erro: a etapa falha, e o erro vira teste fixo REG-NNN (repetir: index.html?robo=1&semente=N).
+$semente = Get-Random -Minimum 1 -Maximum 999999
+$domRobo = Chrome-Dom ((Url 'index.html') + "?robo=1&partidas=9&semente=$semente") '1400,900' 8000000
+$tRobo = Decodificar ([regex]::Match($domRobo, '(?s)<pre id="selftest-report"[^>]*>(.*?)</pre>').Groups[1].Value)
+$okRobo = $tRobo -match '^ROBO PASSOU'
+$detRobo = 'sem relatório (o robô não terminou)'; $linhaCat = ''
+try {
+  $jr = ConvertFrom-Json ($tRobo.Substring($tRobo.IndexOf('{')))
+  $detRobo = "semente $semente · $($jr.partidas) partidas · $($jr.lances) lances · $($jr.passos) conferências · fins: Onça $($jr.fins.J), Cachorros $($jr.fins.D), sem fim $($jr.fins.semFim)"
+  if ($jr.erros) { $detRobo += "`n" + (($jr.erros | ForEach-Object { "- partida $($_.partida), $($_.onde): $($_.oque) $($_.extra | ConvertTo-Json -Compress -Depth 4)" }) -join "`n") }
+  $tiposErro = if ($jr.erros) { (($jr.erros | ForEach-Object { $_.oque } | Sort-Object -Unique) -join '; ') } else { '—' }
+  $linhaCat = "| $(Get-Date -Format 'dd/MM/yyyy HH:mm') | $semente | $($jr.partidas) | $($jr.lances) | $(if ($okRobo) { 'passou' } else { '**achou erros**' }) | $tiposErro |"
+} catch { $linhaCat = "| $(Get-Date -Format 'dd/MM/yyyy HH:mm') | $semente | ? | ? | **não terminou** | relatório ilegível |" }
+Registrar 'Robô testador: partidas inteiras em todos os modos (com quedas e reconexões)' $okRobo $detRobo
+$catalogo = Join-Path $raiz 'testes\robo\CATALOGO.md'
+if (Test-Path $catalogo) { [System.IO.File]::AppendAllText($catalogo, $linhaCat + "`n", (New-Object System.Text.UTF8Encoding($false))) }
+
 # 4) prints para conferência visual
 if (-not $SemPrints) {
   $moldura = Url 'testes\interface\moldura-celular.html'

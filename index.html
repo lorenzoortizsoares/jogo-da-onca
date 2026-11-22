@@ -633,7 +633,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
 
   <button type="button" class="btn btn-atencao btn-parar" id="btnParar" hidden>Parar de capturar</button>
 
-  <!-- chat online: caixinha sempre visível (últimas 4 mensagens); tocar abre o chat completo -->
+  <!-- chat online: caixinha sempre visível (últimas 2 mensagens); tocar abre o chat completo -->
   <div class="minichat" id="miniChat" role="button" tabindex="0" aria-label="Chat: toque para abrir" hidden>
     <div class="minichat-lista" id="miniLista" aria-live="polite"></div>
     <p class="minichat-dica" id="miniDica">Toque para conversar</p>
@@ -705,7 +705,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         <li><b>A onça vence</b> ao capturar 5 cachorros.</li>
         <li><b>Os cachorros vencem</b> quando deixam a onça sem nenhum movimento. A toca é uma ótima armadilha!</li>
       </ul>
-      <p class="nota">Toque numa peça sua e depois num ponto destacado. O botão Câmera troca a visão: normal, do lado oposto e de cima.</p>
+      <p class="nota">Toque numa peça sua e depois num ponto destacado. O botão Câmera troca a visão: normal, do lado oposto e de cima. No celular, use dois dedos (pinça) para dar zoom; o botão Câmera volta ao normal.</p>
       <button type="button" class="btn btn-primario" data-fechar>Entendi</button>
     </div>
   </div>
@@ -2977,9 +2977,10 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
         ring(0.385 * px, 0.016 * px, 'rgba(255,190,150,0.8)', 0.8);
       } else if (kind === 'select') {   // ext 0.55 -> anel r ~0.42
         const px = N / 1.1;
-        ring(0.425 * px, 0.12 * px, 'rgba(242,210,122,0.50)', 7);
-        ring(0.425 * px, 0.065 * px, 'rgba(246,216,130,0.98)', 1.2);
-        ring(0.425 * px, 0.018 * px, 'rgba(255,248,220,0.9)', 0.8);
+        // pedido do usuário: branco claro em volta da peça selecionada (sem cores de "pode ir/pode comer")
+        ring(0.425 * px, 0.12 * px, 'rgba(255,255,255,0.40)', 7);
+        ring(0.425 * px, 0.065 * px, 'rgba(250,250,245,0.95)', 1.2);
+        ring(0.425 * px, 0.018 * px, 'rgba(255,255,255,0.9)', 0.8);
       } else {                          // hover: ext 0.48 -> anel r ~0.37
         const px = N / 0.96;
         ring(0.37 * px, 0.08 * px, 'rgba(255,248,230,0.22)', 5);
@@ -4343,26 +4344,38 @@ function enquadrar(dir) {
   cam.left = cx - (w * s) / 2; cam.right = cx + (w * s) / 2;
   cam.top = cy + (topo + livre / 2) * s; cam.bottom = cam.top - h * s;
   cam.near = 0.1; cam.far = 200;
+  // zoom de pinça (celular): desloca a visão sem deixar o tabuleiro sair da tela
+  const limX = ((cam.right - cam.left) / 2) * (1 - 1 / cam.zoom), limY = ((cam.top - cam.bottom) / 2) * (1 - 1 / cam.zoom);
+  panX = THREE.MathUtils.clamp(panX, -limX, limX); panY = THREE.MathUtils.clamp(panY, -limY, limY);
+  if (panX || panY) {
+    const dx = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).multiplyScalar(panX);
+    const dy = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1).multiplyScalar(panY);
+    cam.position.add(dx).add(dy); controls.target.add(dx).add(dy);
+    cam.updateMatrixWorld();
+  }
   cam.updateProjectionMatrix();
   controls.update();
   pedirRender();
 }
+let panX = 0, panY = 0;            // deslocamento do zoom de pinça (unidades do mundo, eixos da câmera)
+const ZOOM_MAX = 3;
 let animCam = null;
 function recentrar(suave) {
   const v = vistaPadrao();
-  if (!suave) { cam.zoom = 1; enquadrar(direcao(v.az, v.el)); return; }
+  if (!suave) { cam.zoom = 1; panX = 0; panY = 0; enquadrar(direcao(v.az, v.el)); return; }
   const a = anguloAtual();
   let daz = v.az - a.az; daz = ((daz + 540) % 360) - 180;   // caminho mais curto
-  const anim = { t0: performance.now(), dur: 650, az0: a.az, el0: a.el, daz, del: v.el - a.el, z0: cam.zoom };
+  const anim = { t0: performance.now(), dur: 650, az0: a.az, el0: a.el, daz, del: v.el - a.el, z0: cam.zoom, px0: panX, py0: panY };
   animCam = anim;
   // mesma garantia da REG-001: sem quadros de animação, a câmera chega à visão mesmo assim
-  setTimeout(() => { if (animCam === anim) { animCam = null; cam.zoom = 1; enquadrar(direcao(v.az, v.el)); } }, anim.dur + 150);
+  setTimeout(() => { if (animCam === anim) { animCam = null; cam.zoom = 1; panX = 0; panY = 0; enquadrar(direcao(v.az, v.el)); } }, anim.dur + 150);
 }
 function passoAnimCam(t) {
   if (!animCam) return false;
   const k = Math.min(1, (t - animCam.t0) / animCam.dur), e = suavizar(k);
   const az = animCam.az0 + animCam.daz * e, el = animCam.el0 + animCam.del * e;
   cam.zoom = animCam.z0 + (1 - animCam.z0) * e;
+  panX = animCam.px0 * (1 - e); panY = animCam.py0 * (1 - e);
   enquadrar(direcao(az, el));
   if (k >= 1) animCam = null;
   return true;
@@ -4453,11 +4466,9 @@ function alvosAtuais() {
 }
 function desenharMarcadores() {
   limparMarcadores();
-  const a = alvosAtuais();
+  // pedido do usuário: só a peça selecionada ganha um anel branco claro; não mostra para onde ir,
+  // nem o que dá para capturar, nem destaque ao passar o mouse
   if (sel >= 0 && !fim && !ocupado) marcador('select', sel);
-  a.moves.forEach((p) => marcador('move', p));
-  a.caps.forEach((c) => { marcador('capture', c.to); marcador('victim', c.over); });
-  if (hover >= 0 && hover !== sel && !ocupado && !fim) marcador('hover', hover);
   pedirRender();
 }
 
@@ -4695,23 +4706,28 @@ function novaPartida(estado) {
 // ---------------------------------------------------------------- toque / clique
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
-const plano = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const plano = new THREE.Plane(new THREE.Vector3(0, 1, 0), -pos(0).y);   // na altura do tampo (onde ficam as bases das peças)
 function pontoSob(x, y) {
   const r = canvas.getBoundingClientRect();
   ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, cam);
   // ponto do tabuleiro mais próximo
-  let noPlano = -1;
+  let noPlano = -1, pertoBase = Infinity;
   const p = new THREE.Vector3();
   if (ray.ray.intersectPlane(plano, p)) {
     let melhor = 0.45 * 0.45;
-    for (let i = 0; i < L.N; i++) { const w = pos(i); const d = (w.x - p.x) ** 2 + (w.z - p.z) ** 2; if (d < melhor) { melhor = d; noPlano = i; } }
+    for (let i = 0; i < L.N; i++) { const w = pos(i); const d = (w.x - p.x) ** 2 + (w.z - p.z) ** 2; if (d < melhor) { melhor = d; noPlano = i; pertoBase = d; } }
   }
   // um alvo destacado tem prioridade (mesmo que uma peça na frente o cubra)
   const a = alvosAtuais();
   if (noPlano >= 0 && (a.moves.includes(noPlano) || a.caps.some((c) => c.to === noPlano))) return noPlano;
+  // REG-013: tocar na base de uma peça minha escolhe ESSA peça (antes, o boneco da frente "roubava"
+  // o toque e a peça errada era selecionada). Corpo de peça só conta se não há base minha sob o dedo,
+  // e só peças de quem está na vez (a onça não atrapalha o toque nos cachorros e vice-versa).
+  const minha = (i) => i >= 0 && (S.turn === 'J' ? i === S.jaguar : S.board[i] === 1);
+  if (noPlano >= 0 && minha(noPlano) && pertoBase < 0.3 * 0.3) return noPlano;
   const hits = ray.intersectObjects(pecas.filter((o) => o.visible && o.userData.point >= 0), true);
-  for (const h of hits) { let o = h.object; while (o && !o.userData.isPiece) o = o.parent; if (o) return o.userData.point; }
+  for (const h of hits) { let o = h.object; while (o && !o.userData.isPiece) o = o.parent; if (o && minha(o.userData.point)) return o.userData.point; }
   return noPlano;
 }
 let toque = null, dedos = 0;
@@ -4729,6 +4745,40 @@ const soltar = (e) => {
 };
 canvas.addEventListener('pointerup', soltar);
 canvas.addEventListener('pointercancel', () => { dedos = Math.max(0, dedos - 1); toque = null; });
+
+// zoom de pinça no celular (pedido do usuário): 2 dedos aproximam/afastam e arrastam a visão;
+// 1 dedo continua jogando; o botão Câmera volta ao normal. No computador, sem zoom.
+const toques = new Map();
+let pinca = null;
+function iniciarPinca() {
+  const [a, b] = [...toques.values()];
+  pinca = { d0: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), mx0: (a.x + b.x) / 2, my0: (a.y + b.y) / 2, z0: cam.zoom, px0: panX, py0: panY };
+}
+function moverPinca() {
+  const [a, b] = [...toques.values()];
+  const r = canvas.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  const z1 = THREE.MathUtils.clamp(pinca.z0 * d / pinca.d0, 1, ZOOM_MAX);
+  const u = (cam.right - cam.left) / r.width;            // unidades por pixel no zoom 1
+  // o ponto que estava entre os dedos continua entre os dedos
+  panX = pinca.px0 + u * ((pinca.mx0 - cx) / pinca.z0 - (mx - cx) / z1);
+  panY = pinca.py0 - u * ((pinca.my0 - cy) / pinca.z0 - (my - cy) / z1);
+  animCam = null; cam.zoom = z1;
+  const ang = anguloAtual(); enquadrar(direcao(ang.az, ang.el));
+}
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  toques.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (toques.size === 2 && vistaAtual !== 'cima') iniciarPinca();   // pedido: zoom nas visões normal e oposta (na de cima, não)
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'touch' || !toques.has(e.pointerId)) return;
+  toques.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinca && toques.size >= 2) moverPinca();
+});
+const fimToque = (e) => { if (toques.delete(e.pointerId) && toques.size < 2) pinca = null; };
+canvas.addEventListener('pointerup', fimToque);
+canvas.addEventListener('pointercancel', fimToque);
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'mouse' || toque) return;
   const i = pontoSob(e.clientX, e.clientY);
@@ -4779,6 +4829,7 @@ function comecar(estado) {
   novaPartida(estado);
 }
 function trocarVista() {
+  if (cam.zoom > 1.01 || panX || panY) { recentrar(true); toast('Zoom normal'); return; }   // com zoom: 1º toque só desfaz o zoom
   vistaAtual = VISTAS[(VISTAS.indexOf(vistaAtual) + 1) % VISTAS.length];
   recentrar(true);
   toast(NOME_VISTA[vistaAtual]);
@@ -4963,7 +5014,7 @@ function linhaChat(m) {
   return p;
 }
 function renderChat() {
-  $('miniLista').replaceChildren(...historicoChat.slice(-4).map(linhaChat));
+  $('miniLista').replaceChildren(...historicoChat.slice(-2).map(linhaChat)   /* pedido: no máximo 2 na caixinha */);
   const lista = $('chatLista');
   lista.replaceChildren(...historicoChat.map(linhaChat));
   lista.scrollTop = lista.scrollHeight;
@@ -5159,6 +5210,8 @@ function posicaoMeio() {
 // ---------------------------------------------------------------- início
 if (SELFTEST) {
   autoteste();
+} else if (qs.get('robo') === '1') {
+  roboTestador(Number(qs.get('semente')) || 12345, Number(qs.get('partidas')) || 8);
 } else if (qs.has('mode')) {
   cfg.mode = qs.get('mode') === 'pvp' ? 'pvp' : 'ai';
   if (qs.get('side') === 'J' || qs.get('side') === 'D') cfg.humanSide = qs.get('side');
@@ -5223,6 +5276,59 @@ async function autoteste() {
     for (let k = 0; k < 3; k++) { $('btnCamera').click(); await dormir(900); vistas.push([vistaAtual, Math.round(anguloAtual().el)]); }
     check('câmera: botão alterna normal → lado oposto → de cima → normal', JSON.stringify(vistas) === JSON.stringify([['oposta', 35], ['cima', 90], ['normal', 35]]), vistas);
     check('câmera: aviso com o nome da visão', !$('toast').hidden && $('toast').textContent === 'Visão normal', $('toast').textContent);
+
+    // zoom de pinça no celular (2 dedos); 1 dedo continua jogando; Câmera volta ao normal
+    await dormir(900);
+    const rc0 = canvas.getBoundingClientRect(), mx = rc0.left + rc0.width / 2, my = rc0.top + rc0.height / 2;
+    const dedo = (tipo, id, x, y) => canvas.dispatchEvent(new PointerEvent(tipo, { clientX: x, clientY: y, bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: id === 21, button: 0, buttons: tipo === 'pointerup' ? 0 : 1 }));
+    const chaveAntesZoom = L.positionKey(S);
+    dedo('pointerdown', 21, mx - 40, my); dedo('pointerdown', 22, mx + 40, my);
+    dedo('pointermove', 21, mx - 80, my); dedo('pointermove', 22, mx + 80, my);
+    const zoomMeio = cam.zoom;
+    dedo('pointermove', 21, mx - 200, my); dedo('pointermove', 22, mx + 200, my);
+    check('zoom: pinça aproxima e para no máximo (3×)', zoomMeio > 1.8 && zoomMeio < 2.2 && Math.abs(cam.zoom - ZOOM_MAX) < 1e-6, { zoomMeio, zoom: cam.zoom });
+    const centroTela = () => { const v = centro.clone().project(cam); return { x: v.x, y: v.y }; };
+    const c0 = centroTela();
+    dedo('pointermove', 21, mx - 140, my + 50); dedo('pointermove', 22, mx + 260, my + 50);
+    const c1 = centroTela();
+    check('zoom: arrastar com 2 dedos move a visão', Math.abs(c1.x - c0.x) > 0.05 || Math.abs(c1.y - c0.y) > 0.05, { c0, c1 });
+    for (let k = 0; k < 20; k++) { dedo('pointermove', 21, mx + 400 + k * 50, my + 400); dedo('pointermove', 22, mx + 800 + k * 50, my + 400); }
+    // mesmo arrastando muito, a borda do tabuleiro continua na tela (dá para ver o canto, não some)
+    const naTela = board.fitPoints.map((p) => p.clone().project(cam)).filter((v) => Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1).length;
+    const xs = board.fitPoints.map((p) => p.clone().project(cam).x);
+    check('zoom: o tabuleiro não foge da tela', Math.min(...xs) <= -0.9 && Math.max(...xs) >= 0.9 || naTela > 0, { naTela, min: Math.min(...xs), max: Math.max(...xs) });
+    dedo('pointerup', 22, mx + 260, my + 50); dedo('pointerup', 21, mx - 140, my + 50);
+    await dormir(50);
+    check('zoom: pinça não conta como jogada', L.positionKey(S) === chaveAntesZoom && dedos === 0 && toques.size === 0, { dedos, toques: toques.size });
+    clicarPonto(12); await dormir(30);
+    check('zoom: com zoom, tocar numa peça ainda funciona', sel === 12, sel);
+    clicarPonto(12); await dormir(30);
+    $('btnCamera').click(); await dormir(900);
+    check('zoom: botão Câmera tira o zoom e mantém a visão', cam.zoom === 1 && panX === 0 && panY === 0 && vistaAtual === 'normal' && $('toast').textContent === 'Zoom normal', { zoom: cam.zoom, vistaAtual });
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, clientX: mx, clientY: my, bubbles: true, cancelable: true })); await dormir(50);
+    check('zoom: no computador a roda do mouse continua sem zoom', cam.zoom === 1);
+
+    // REG-013 (achado pelo robô testador): tocar na base de um cachorro selecionava OUTRO cachorro
+    // (o boneco da frente cobria). Em todas as visões, tocar na base de cada peça minha escolhe ela.
+    const estadoAntesReg13 = S;
+    const erradas = [];
+    for (const v of VISTAS) {
+      vistaAtual = v; recentrar(false); await dormir(30);
+      for (const turno of ['D', 'J']) {
+        window.__onca.loadState(Object.assign({}, L.initialState(), { turn: turno })); await dormir(10);
+        const minhas = turno === 'D' ? [...Array(L.N).keys()].filter((i) => S.board[i] === 1) : [S.jaguar];
+        for (const i of minhas) { sel = -1; clicarPonto(i); if (sel !== i) erradas.push({ visao: v, peca: i, escolheu: sel }); }
+      }
+    }
+    check('REG-013 tocar na base de uma peça escolhe essa peça (3 visões)', erradas.length === 0, erradas.slice(0, 6));
+    check('marcadores: só o anel da peça selecionada (sem destino, captura ou destaque)', marcadores.children.filter((m) => m.visible).length === 1 && marcadores.children.filter((m) => m.visible)[0].userData.kind === 'select', marcadores.children.filter((m) => m.visible).map((m) => m.userData.kind));
+    vistaAtual = 'cima'; recentrar(false); await dormir(30);
+    dedo('pointerdown', 21, mx - 40, my); dedo('pointerdown', 22, mx + 40, my);
+    dedo('pointermove', 21, mx - 200, my); dedo('pointermove', 22, mx + 200, my);
+    dedo('pointerup', 22, mx + 200, my); dedo('pointerup', 21, mx - 200, my);
+    check('zoom: na visão de cima a pinça não dá zoom', cam.zoom === 1);
+    vistaAtual = 'normal'; recentrar(false);
+    window.__onca.loadState(estadoAntesReg13); sel = -1; desenharMarcadores(); await dormir(30);
 
     // painel Som: efeitos liga/desliga e volume do som da floresta com − e + (pedido do usuário)
     const florestaAntes = nivelFloresta, mudoAntes = audio ? audio.isMuted() : true;
@@ -5336,7 +5442,7 @@ async function autoteste() {
     $('btnModoOnline').click(); $('btnCriarSala').click();
     document.querySelector('[data-lado-online="J"]').click();
     $('btnConfirmarCriar').click();
-    await esperar(() => $('telaOnline').dataset.etapa === 'aguardando', 3000);
+    await esperar(() => $('telaOnline').dataset.etapa === 'aguardando', 15000);   // REG-012: tempo virtual
     const codigo = sala && sala.codigo;
     check('online: criar sala mostra o código', ON.codigoValido(codigo) && $('codigoSala').textContent === ON.formatarCodigo(codigo), $('codigoSala').textContent);
     check('REG-002 layout: tela da sala criada cabe na tela', vazamentos().length === 0, vazamentos());
@@ -5344,7 +5450,7 @@ async function autoteste() {
     const info = await conv.consultar(codigo);
     check('online: quem entra vê que a outra pessoa é a Onça e fica com os Cachorros', info.existe && info.status === 'aguardando' && info.ladoCriador === 'J' && info.meuLado === 'D', info);
     await conv.entrar(3000);
-    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 3000);
+    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 15000);   // REG-012: tempo virtual
     check('online: a partida começa nos dois lados', !$('telaPartida').hidden && conv.meuLado === 'D' && sala.meuLado === 'J' && $('status').textContent === 'Sua vez (Onça)', $('status').textContent);
     // REG-006: logo ao entrar aparecia "Adversário desconectado" até a 1ª batida periódica (8 s no jogo real)
     await esperar(() => sala.adversarioOnline && conv.adversarioOnline, 100);
@@ -5353,7 +5459,7 @@ async function autoteste() {
     check('online: sem botão Desfazer', $('btnDesfazer').hidden && !podeDesfazer());
 
     // CHAT criptografado de ponta a ponta
-    await esperar(() => sala.chatPronto && conv.chatPronto, 3000);
+    await esperar(() => sala.chatPronto && conv.chatPronto, 15000);   // REG-012: tempo virtual
     check('chat: chave secreta combinada nos dois celulares', sala.chatPronto && conv.chatPronto, { eu: sala._diag(), conv: conv._diag() });
     check('chat: caixinha aparece no canto inferior esquerdo', !$('miniChat').hidden && (() => { const r = $('miniChat').getBoundingClientRect(); return r.left < 40 && r.bottom > window.innerHeight * 0.6; })());
     const recebidasRobo = [];
@@ -5361,7 +5467,7 @@ async function autoteste() {
     $('miniChat').click(); await dormir(60);
     check('chat: tocar na caixinha abre o chat completo', !$('chat').hidden);
     $('chatTexto').value = 'Boa sorte!'; $('chatForm').requestSubmit();
-    await esperar(() => recebidasRobo.length === 1, 3000);
+    await esperar(() => recebidasRobo.length === 1, 15000);   // REG-012: tempo virtual
     check('chat: minha mensagem chega decifrada no outro celular', recebidasRobo.length === 1 && recebidasRobo[0].texto === 'Boa sorte!' && recebidasRobo[0].lado === 'J', recebidasRobo);
     const noServidor = broker.publicacoes.filter((p) => p.topico.endsWith('/chat'));
     check('cripto: no servidor só passa texto embaralhado (sem o texto, sem nomes)', noServidor.length >= 1 && noServidor.every((p) => {
@@ -5369,11 +5475,11 @@ async function autoteste() {
       return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv,mac' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
     }), noServidor.map((p) => p.msg));
     await conv.enviarChat('<img src=x onerror="window.__xss=1"><b>oi</b>');
-    await esperar(() => historicoChat.length === 2, 3000);
+    await esperar(() => historicoChat.length === 2, 15000);   // REG-012: tempo virtual
     check('segurança: texto com código vira só texto (nada é executado)', !document.querySelector('#miniChat img, #chatLista img, #chatLista b b') && !window.__xss && $('chatLista').textContent.includes('<img src=x'), $('chatLista').textContent);
     for (let k = 1; k <= 4; k++) await conv.enviarChat('msg ' + k);
-    await esperar(() => historicoChat.length === 6, 3000);
-    check('chat: a caixinha mostra só as últimas 4; o chat completo mostra todas', $('miniLista').children.length === 4 && $('chatLista').children.length === 6, [$('miniLista').children.length, $('chatLista').children.length]);
+    await esperar(() => historicoChat.length === 6, 15000);   // REG-012: tempo virtual
+    check('chat: a caixinha mostra só as últimas 2; o chat completo mostra todas', $('miniLista').children.length === 2 && $('chatLista').children.length === 6, [$('miniLista').children.length, $('chatLista').children.length]);
     check('chat: nome Onça/Cachorros em cada mensagem', $('miniLista').lastElementChild.textContent === 'Cachorros: msg 4' && $('chatLista').firstElementChild.textContent === 'Onça (você): Boa sorte!', [$('miniLista').lastElementChild.textContent, $('chatLista').firstElementChild.textContent]);
     check('chat: mensagem longa demais é recusada', (await sala.enviarChat('x'.repeat(ON.LIMITE_CHAT + 1))).motivo === 'longo');
     check('REG-002 layout: chat completo cabe na tela', vazamentos().length === 0, vazamentos());
@@ -5384,12 +5490,12 @@ async function autoteste() {
     check('REG-003 texto da vez inteiro (online)', !cortado(), $('status').textContent);
     // meu lance chega ao adversário
     clicarPonto(12); clicarPonto(17); await ocioso();
-    await esperar(() => conv.estado && conv.estado.seq === 1, 2000);
+    await esperar(() => conv.estado && conv.estado.seq === 1, 15000);   // REG-012: tempo virtual
     check('online: meu lance chega ao adversário', conv.estado && conv.estado.seq === 1 && conv.estado.lance.type === 'step' && conv.estado.lance.to === 17 && conv.estado.estado.jaguar === 17, conv.estado && conv.estado.lance);
     check('online: na vez do adversário eu não mexo', (() => { const k = L.positionKey(S); clicarPonto(11); clicarPonto(16); return L.positionKey(S) === k; })());
     // lance do adversário chega e anima aqui
     conv.jogar({ type: 'dog', from: 11, to: 16 }, L.applyDogMove(conv.estado.estado, 11, 16));
-    await esperar(() => S.board[16] === 1 && !window.__onca.isBusy(), 3000);
+    await esperar(() => S.board[16] === 1 && !window.__onca.isBusy(), 15000);   // REG-012: tempo virtual
     check('online: lance do adversário aparece no meu tabuleiro', S.board[16] === 1 && S.board[11] === 0 && caoEm[16] && perto(caoEm[16], 16) && S.turn === 'J' && seqOnline === 2, { seq: seqOnline, status: $('status').textContent });
     // terceira pessoa não entra
     const intruso = robo('robo-intruso');
@@ -5412,20 +5518,20 @@ async function autoteste() {
     b3[22] = 2;
     const posC = Object.assign({}, L.initialState(), { board: b3, jaguar: 22, captured: 0, turn: 'J', ply: 10 });
     conv.jogar({ type: 'dog', from: 16, to: 11 }, posC);   // força a posição (lance não confere -> sincroniza)
-    await esperar(() => S.jaguar === 22 && seqOnline === 4, 2000);
+    await esperar(() => S.jaguar === 22 && seqOnline === 4, 15000);   // REG-012: tempo virtual
     clicarPonto(22); clicarPonto(12); await ocioso(); clicarPonto(2); await ocioso();
-    await esperar(() => conv.estado && conv.estado.seq === 5, 2000);
+    await esperar(() => conv.estado && conv.estado.seq === 5, 15000);   // REG-012: tempo virtual
     check('online: captura em cadeia chega inteira (2 pulos)', conv.estado && conv.estado.lance.type === 'capture' && conv.estado.lance.captured.length === 2 && conv.estado.estado.captured === 2, conv.estado && conv.estado.lance);
     // adversário cai e volta
     conv._transporte().cair();
-    await esperar(() => $('vez').dataset.rede === 'off', 2000);
+    await esperar(() => $('vez').dataset.rede === 'off', 15000);   // REG-012: tempo virtual
     check('online: aviso quando o adversário cai', $('vez').dataset.rede === 'off');
     conv._transporte().voltar();
-    await esperar(() => $('vez').dataset.rede === 'on', 2000);
+    await esperar(() => $('vez').dataset.rede === 'on', 15000);   // REG-012: tempo virtual
     check('online: aviso some quando ele volta', $('vez').dataset.rede === 'on');
     // adversário sai
     conv.sair();
-    await esperar(() => !$('avisoOnline').hidden, 2000);
+    await esperar(() => !$('avisoOnline').hidden, 15000);   // REG-012: tempo virtual
     check('online: aviso quando o adversário sai', !$('avisoOnline').hidden && /saiu/.test($('avisoTitulo').textContent), $('avisoTitulo').textContent);
     $('avisoSim').click(); await dormir(30);
     check('online: "Ir para o início" fecha a sala', !$('telaInicio').hidden && sala === null);
@@ -5440,21 +5546,21 @@ async function autoteste() {
     const criador = robo('robo-criador');
     const rc = await criador.criar('D');
     $('campoCodigo').value = rc.codigo.toLowerCase(); $('btnBuscarSala').click();
-    await esperar(() => $('telaOnline').dataset.etapa === 'confirmar', 3000);
+    await esperar(() => $('telaOnline').dataset.etapa === 'confirmar', 15000);   // REG-012: tempo virtual
     check('online: confirmação mostra que eu sou a Onça', $('ladoMeu').textContent === 'a Onça' && $('ladoOutro').textContent === 'os Cachorros', [$('ladoMeu').textContent, $('ladoOutro').textContent]);
     check('REG-002 layout: confirmação cabe na tela', vazamentos().length === 0, vazamentos());
     $('btnAceitar').click();
-    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 3000);
+    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 15000);   // REG-012: tempo virtual
     check('online: aceitar começa a partida (eu = Onça)', !$('telaPartida').hidden && sala && sala.meuLado === 'J' && $('status').textContent === 'Sua vez (Onça)', $('status').textContent);
     await esperar(() => sala.adversarioOnline && criador.adversarioOnline, 100);
     check('REG-006 adversário aparece conectado logo ao aceitar (convidado e criador)', sala.adversarioOnline && criador.adversarioOnline && $('vez').dataset.rede === 'on',
       { eu: sala._diag(), criador: criador._diag() });
     // revanche trocando de lado (pedido do outro, eu aceito)
     criador.pedirRevanche(true);
-    await esperar(() => !$('avisoOnline').hidden, 2000);
+    await esperar(() => !$('avisoOnline').hidden, 15000);   // REG-012: tempo virtual
     check('online: pedido de revanche aparece', !$('avisoOnline').hidden && /Revanche/.test($('avisoTitulo').textContent));
     $('avisoSim').click();
-    await esperar(() => partidaOnline === 2 && sala.meuLado === 'D', 2000);
+    await esperar(() => partidaOnline === 2 && sala.meuLado === 'D', 15000);   // REG-012: tempo virtual
     check('online: revanche trocando de lado (agora eu sou os Cachorros)', partidaOnline === 2 && sala.meuLado === 'D' && criador.meuLado === 'J' && $('status').textContent === 'Vez do adversário (Onça)',
       { status: $('status').textContent, advOnline: sala.adversarioOnline, conectado: sala.conectado, papel: sala.papel, criadorConectado: criador.conectado, eu: sala._diag(), robo: criador._diag() });
     criador.fechar();
@@ -5476,6 +5582,198 @@ async function autoteste() {
   pre.textContent = 'SELFTEST ' + (rel.ok ? 'PASSOU' : 'FALHOU') + '\n' + JSON.stringify(rel, null, 1);
   document.documentElement.setAttribute('data-selftest', rel.ok ? 'passou' : 'falhou');
   // dentro da moldura de celular (iframe), manda o relatório para a página de fora
+  try { if (window.parent !== window) window.parent.postMessage({ tipo: 'selftest', rel }, '*'); } catch (e) { /* ignorar */ }
+}
+
+// ---------------------------------------------------------------- robô testador (?robo=1)
+// Pedido do usuário: um "agente" que joga sozinho testando tudo o que é possível e anota os erros.
+// Joga partidas inteiras pela interface de verdade (cliques), com sorteio reproduzível (semente),
+// mexendo também em desfazer, câmera, zoom de pinça, menu, regras e painel de som; no online
+// (servidor simulado) também cai, volta, recarrega a página e sai/entra na sala.
+// A cada passo confere: tabuleiro 3D = regras, nada vaza da tela, texto da vez inteiro, sem erro de JS.
+// Cada erro encontrado vira um teste REG fixo (veja testes/REGRESSOES.md).
+async function roboTestador(semente, partidas) {
+  const pre = $('selftest-report'); pre.hidden = false;
+  let x = semente >>> 0 || 1;
+  const rnd = () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+  const escolher = (a) => a[Math.floor(rnd() * a.length)];
+  const erros = [], log = [];
+  let passos = 0, lances = 0, partidaAtual = 0, jsVistos = window.__errors.length;
+  const fins = { J: 0, D: 0, semFim: 0 };
+  const anotar = (onde, oque, extra) => { if (erros.length < 60) erros.push({ partida: partidaAtual, passo: passos, onde, oque, extra: extra === undefined ? '' : extra, estado: L.positionKey(S) }); };
+  const esperar = async (cond, ms = 20000) => { const t = performance.now(); while (!cond() && performance.now() - t < ms) await dormir(25); return cond(); };
+  const ocioso = () => esperar(() => !window.__onca.isBusy());
+
+  async function conferir(onde) {
+    await ocioso();   // nunca confere no meio de uma animação (peça ainda deslizando)
+    passos++;
+    if (!estadoValido(S)) { anotar(onde, 'estado impossível'); return; }
+    const naoBate = [];
+    for (let i = 0; i < L.N; i++) {
+      if (S.board[i] === 1 && !(caoEm[i] && caoEm[i].position.distanceTo(pos(i)) < 0.03)) naoBate.push(i);
+      if (S.board[i] !== 1 && caoEm[i]) naoBate.push('sobra ' + i);
+    }
+    if (naoBate.length) anotar(onde, 'cachorros 3D fora do lugar', naoBate);
+    if (puma.position.distanceTo(pos(S.jaguar)) > 0.03) anotar(onde, 'onça 3D fora do lugar', S.jaguar);
+    const naBandeja = caes.filter((d) => d.userData.point < 0 && d.visible).length;
+    if (naBandeja !== Math.min(S.captured, 5)) anotar(onde, 'bandeja não confere com o placar', { naBandeja, capturados: S.captured });
+    if ($('capNum').textContent !== String(S.captured)) anotar(onde, 'placar errado', $('capNum').textContent);
+    const w = L.winner(S);
+    if (w && !fim && !cadeia) anotar(onde, 'partida acabou mas o jogo não percebeu', w);
+    if (!w && fim) anotar(onde, 'jogo diz que acabou sem vencedor', fim);
+    const st = $('status');
+    if (!st.textContent || st.textContent === '—') anotar(onde, 'texto da vez vazio');
+    if (st.scrollWidth > st.clientWidth + 1) anotar(onde, 'texto da vez cortado', st.textContent);
+    const vaz = vazamentos(); if (vaz.length) anotar(onde, 'algo saiu da tela', vaz);
+    if (window.__errors.length > jsVistos) { anotar(onde, 'erro de JavaScript', window.__errors.slice(jsVistos)); jsVistos = window.__errors.length; }
+  }
+
+  // executa um lance legal pelos cliques (como uma pessoa)
+  async function jogarLance(m) {
+    // como uma pessoa: se algum ponto do lance está fora da tela (zoom), tira o zoom antes
+    const r = canvas.getBoundingClientRect();
+    const pontos = m.type === 'capture' ? m.path : [m.from, m.to];
+    if (pontos.some((i) => { const q = posTela(i); return q.x < r.left || q.x > r.right || q.y < r.top || q.y > r.bottom; })) { $('btnCamera').click(); await dormir(800); }
+    let selApos = null; if (m.type === 'dog' || m.type === 'step') { if (sel !== m.from) clicarPonto(m.from); selApos = sel; clicarPonto(m.to); }
+    else {
+      if (sel !== S.jaguar) clicarPonto(S.jaguar);
+      for (let k = 1; k < m.path.length; k++) { await ocioso(); clicarPonto(m.path[k]); }
+      await ocioso();
+      if (cadeia) { if (rnd() < 0.5) $('btnParar').click(); else clicarPonto(S.jaguar); }   // para no meio da cadeia
+    }
+    await ocioso();
+    lances++;
+    return { m, selApos, sob: m.from != null ? pontoSob(posTela(m.from).x, posTela(m.from).y) : null };
+  }
+  // ações "de gente curiosa" no meio da partida
+  async function bagunca(online) {
+    const r = rnd();
+    if (r < 0.06) { $('btnCamera').click(); await dormir(800); }
+    else if (r < 0.10) {
+      const rc = canvas.getBoundingClientRect(), mx = rc.left + rc.width / 2, my = rc.top + rc.height / 2;
+      const dedo = (t, id, px, py) => canvas.dispatchEvent(new PointerEvent(t, { clientX: px, clientY: py, bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: id === 31, buttons: t === 'pointerup' ? 0 : 1 }));
+      const a = 20 + rnd() * 60, b = a + rnd() * 200;
+      dedo('pointerdown', 31, mx - a, my); dedo('pointerdown', 32, mx + a, my);
+      dedo('pointermove', 31, mx - b, my + 30); dedo('pointermove', 32, mx + b, my + 30);
+      dedo('pointerup', 32, mx + b, my); dedo('pointerup', 31, mx - b, my);
+      if (!(cam.zoom >= 1 && cam.zoom <= ZOOM_MAX)) anotar('zoom', 'zoom fora dos limites', cam.zoom);
+    } else if (r < 0.13 && podeDesfazer()) { desfazer(); await dormir(30); }
+    else if (r < 0.15) {
+      $('btnMenu').click(); await dormir(30);
+      if ($('menu').hidden) anotar('menu', 'Menu não abriu');
+      $('menu').querySelector('[data-fechar]').click(); await dormir(30);
+      if (!$('menu').hidden) anotar('menu', 'Menu não fechou');
+    } else if (r < 0.17) {
+      $('btnSom').click(); await dormir(30);
+      if ($('painelSom').hidden) anotar('som', 'painel de som não abriu');
+      if (rnd() < 0.5) $('btnFlorestaMenos').click(); else $('btnFlorestaMais').click();
+      $('painelSom').querySelector('[data-fechar]').click(); await dormir(30);
+    } else if (r < 0.18) {
+      $('btnMenu').click(); await dormir(30);
+      $('menu').querySelector('[data-abrir="regras"]').click(); await dormir(30);
+      if ($('regras').hidden) anotar('regras', 'Regras não abriram pelo Menu');
+      fecharSobreposicoes(); await dormir(30);
+    } else if (r < 0.20) { clicarPonto(Math.floor(rnd() * L.N)); await ocioso(); }   // toque aleatório (pode ser inválido)
+    else if (online && r < 0.23) await online.cair();
+    else if (online && r < 0.25) await online.recarregar();
+    if (!$('menu').hidden || !$('painelSom').hidden || !$('regras').hidden) { fecharSobreposicoes(); await dormir(20); }
+  }
+
+  // ---- online com servidor simulado: eu (interface) contra um robô adversário
+  async function prepararOnline() {
+    const broker = ON.criarBrokerMemoria();
+    fabricaTransporte = () => broker.criarTransporte();
+    opcoesSala = { batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 };
+    const adv = ON.criarSala({ id: 'robo-adv-' + partidaAtual, criarTransporte: () => broker.criarTransporte(), initialState: () => L.initialState(), batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 });
+    ladoOnline = rnd() < 0.5 ? 'J' : 'D';
+    irParaOnline('menu'); $('btnCriarSala').click();
+    document.querySelector(`[data-lado-online="${ladoOnline}"]`).click(); $('btnConfirmarCriar').click();
+    if (!(await esperar(() => $('telaOnline').dataset.etapa === 'aguardando'))) { anotar('online', 'criar sala não terminou', $('telaOnline').dataset.etapa); return null; }
+    const codigo = sala.codigo;
+    const c = await adv.consultar(codigo); if (!c.existe) { anotar('online', 'adversário não achou a sala'); return null; }
+    await adv.entrar(15000);
+    if (!(await esperar(() => !$('telaPartida').hidden && partidaOnline >= 1))) { anotar('online', 'partida online não começou'); return null; }
+    // o robô adversário joga sozinho (lance legal sorteado) quando é a vez dele; confere de tempos em
+    // tempos (assim não perde a vez nem se a partida começou antes de ele "prestar atenção")
+    let jogouSeq = -1;
+    const timerAdv = setInterval(() => {
+      const msg = adv.estado; if (!msg || !msg.estado || !adv.meuLado) return;
+      const e = msg.estado; if (e.turn !== adv.meuLado || L.winner(e) || jogouSeq === msg.partida * 100000 + msg.seq) return;
+      const ms = L.legalMoves(e); if (!ms.length) return;
+      jogouSeq = msg.partida * 100000 + msg.seq;
+      const m = escolher(ms); adv.jogar(m, L.applyMove(e, m));
+    }, 120);
+    const ctl = {
+      broker, adv, codigo, timerAdv,
+      async cair() {     // minha internet cai e volta
+        const tr = sala && sala._transporte(); if (!tr || !tr.cair) return;
+        tr.cair(); await dormir(200 + rnd() * 900); tr.voltar();
+        await esperar(() => sala && sala.conectado && $('vez').dataset.rede === 'on', 8000);
+        if ($('vez').dataset.rede !== 'on') anotar('online', 'depois de cair e voltar, segue "desconectado"', $('status').textContent);
+      },
+      async recarregar() {   // fecho o app (ou recarrego a página) e volto pela sala salva
+        if (!sala) return;
+        const antes = L.positionKey(sala.estado ? sala.estado.estado : S);
+        sala.fechar(); sala = null; partidaOnline = 0; seqOnline = 0;
+        mostrarTela('telaInicio'); await dormir(100 + rnd() * 400);
+        if ($('btnRetomar').hidden) { anotar('online', 'botão "Voltar para a sala online" não apareceu depois de fechar'); return; }
+        $('btnRetomar').click();
+        const voltou = await esperar(() => !$('telaPartida').hidden && partidaOnline >= 1 && sala && sala.adversarioOnline, 15000);
+        if (!voltou) anotar('online', 'voltar para a sala depois de fechar o app não funcionou', { tela: $('telaOnline').dataset.etapa, erro: $('erroOnline').textContent });
+        else if (L.positionKey(S) !== antes && !(sala.estado && L.positionKey(sala.estado.estado) === L.positionKey(S))) anotar('online', 'voltou para a sala com outro tabuleiro');
+      },
+    };
+    return ctl;
+  }
+
+  try {
+    for (let p = 0; p < partidas; p++) {
+      partidaAtual = p + 1;
+      const modo = ['pvp', 'ai', 'online'][p % 3];
+      let online = null;
+      if (modo === 'online') { online = await prepararOnline(); if (!online) continue; }
+      else {
+        cfg.mode = modo; cfg.oncaPlayer = 1 + (p % 2); cfg.humanSide = rnd() < 0.5 ? 'J' : 'D'; cfg.level = 1 + (p % 4);
+        comecar(); await ocioso();
+      }
+      log.push({ partida: partidaAtual, modo, lado: modo === 'ai' ? cfg.humanSide : modo === 'online' ? ladoOnline : '-', nivel: modo === 'ai' ? cfg.level : '-' });
+      await esperar(() => !ocupado || fim);
+      await conferir('início');
+      let limite = (modo === 'ai' && cfg.level >= 3) ? 40 : 300;   // Avançado/Expert pensam devagar: limita para o teste não demorar
+      while (!fim && limite-- > 0) {
+        await bagunca(online); await conferir('depois de mexer na interface');
+        if (fim) break;
+        if (!humano(S.turn) || ocupado) {
+          await esperar(() => (!ocupado && humano(S.turn)) || fim, 30000);
+          if (!fim && (ocupado || !humano(S.turn))) { anotar(modo, 'o outro lado não jogou em 30 s', $('status').textContent); break; }
+          await conferir('depois do outro lado'); continue;
+        }
+        const ms = L.legalMoves(S);
+        if (!ms.length) { anotar('regras', 'sem lances mas o jogo não acabou'); break; }
+        const antes = L.positionKey(S);
+        const diag = await jogarLance(escolher(ms));
+        if (L.positionKey(S) === antes && !fim) anotar('clique', 'lance legal pelos cliques não aconteceu', diag);
+        await conferir('depois do lance');
+      }
+      if (fim) { fins[fim]++; await dormir(800); if ($('vitoria').hidden) anotar('fim', 'janela de vitória não apareceu'); }
+      else fins.semFim++;
+      Object.assign(log[log.length - 1], { resultado: fim || 'sem fim (limite de lances)', lancesAteAqui: lances });
+      $('vitoria').hidden = true;
+      if (online) {
+        // sair da sala de verdade: o outro é avisado e nada fica guardado no servidor
+        let saiu = false; online.adv.on('saiu', () => { saiu = true; });
+        irParaInicio(); await esperar(() => saiu, 5000);
+        if (!saiu) anotar('online', 'o adversário não foi avisado da saída');
+        const sobras = Object.keys(online.broker.retidos).filter((k) => k.indexOf(online.adv.topico) === 0 && !/presenca/.test(k));
+        if (sobras.length) anotar('online', 'sobrou coisa guardada no servidor depois de sair', sobras);
+        clearInterval(online.timerAdv); online.adv.fechar();
+        fabricaTransporte = (i) => ON.criarTransporteMqtt(ON.SERVIDORES[i]); opcoesSala = {};
+      }
+    }
+  } catch (e) { anotar('robô', 'exceção: ' + (e && e.stack || e)); }
+  const rel = { ok: erros.length === 0, robo: true, semente, partidas, passos, lances, fins, erros, log };
+  pre.textContent = 'ROBO ' + (rel.ok ? 'PASSOU' : 'ACHOU ERROS') + '\n' + JSON.stringify(rel, null, 1);
+  document.documentElement.setAttribute('data-robo', rel.ok ? 'passou' : 'falhou');
   try { if (window.parent !== window) window.parent.postMessage({ tipo: 'selftest', rel }, '*'); } catch (e) { /* ignorar */ }
 }
 

@@ -33,7 +33,7 @@
 - Recarregar a página volta para a mesma sala e partida.
 - Conexão sem conta: servidor MQTT público gratuito (HiveMQ) com reserva (EMQX);
   só os lances trafegam.
-- Chat só no online: caixinha com as 4 últimas mensagens (canto inferior esquerdo), toque abre o chat completo; criptografia de ponta a ponta (ECDH + AES-GCM); apagado ao sair da sala.
+- Chat só no online: caixinha com as 2 últimas mensagens (canto inferior esquerdo), toque abre o chat completo; criptografia de ponta a ponta (ECDH + AES-GCM); apagado ao sair da sala.
 - Segurança (REG-010): o servidor nunca vê o código da sala (o canal é um resumo PBKDF2) e toda mensagem é assinada (HMAC) com chave tirada do código. Dados guardados no servidor expiram em 6 h e são apagados ao sair.
 
 ## Regras

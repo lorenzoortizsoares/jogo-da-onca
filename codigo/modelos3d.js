@@ -982,9 +982,10 @@
         ring(0.385 * px, 0.016 * px, 'rgba(255,190,150,0.8)', 0.8);
       } else if (kind === 'select') {   // ext 0.55 -> anel r ~0.42
         const px = N / 1.1;
-        ring(0.425 * px, 0.12 * px, 'rgba(242,210,122,0.50)', 7);
-        ring(0.425 * px, 0.065 * px, 'rgba(246,216,130,0.98)', 1.2);
-        ring(0.425 * px, 0.018 * px, 'rgba(255,248,220,0.9)', 0.8);
+        // pedido do usuário: branco claro em volta da peça selecionada (sem cores de "pode ir/pode comer")
+        ring(0.425 * px, 0.12 * px, 'rgba(255,255,255,0.40)', 7);
+        ring(0.425 * px, 0.065 * px, 'rgba(250,250,245,0.95)', 1.2);
+        ring(0.425 * px, 0.018 * px, 'rgba(255,255,255,0.9)', 0.8);
       } else {                          // hover: ext 0.48 -> anel r ~0.37
         const px = N / 0.96;
         ring(0.37 * px, 0.08 * px, 'rgba(255,248,230,0.22)', 5);
