@@ -22,19 +22,30 @@
    barra de baixo (Desfazer, Câmera, Som, Menu). "Parar de capturar" aparece durante
    uma sequência de capturas. Fim de partida: Revanche, Trocar lados (2 jogadores), Início.
 
+
 ## Online (cada um no seu celular, só 2 pessoas)
-- Início → "Jogar online" → **Criar sala** (quem cria escolhe Onça ou Cachorros) ou
-  **Entrar numa sala** (código de 6 caracteres, como `ABC-234`, ou link de convite).
-- Quem entra vê o lado de cada um e toca em **"Aceitar e começar"**.
-- Convite pelo botão "Enviar convite" (compartilhar do celular / copiar link).
+- Início → "Jogar online" → campo **Seu apelido** (opcional, até 12 letras, fica salvo no aparelho) e:
+  **Criar sala**, **Salas abertas** (lista) ou **Entrar com código** (6 caracteres, como `ABC-234`, ou link de convite).
+- Criar sala: **Nome da sala** (opcional, até 24 letras), **Pública** (aparece na lista de salas abertas)
+  ou **Privada** (só com código/convite), e o lado (Onça ou Cachorros).
+- Salas abertas: mostra só salas públicas esperando o 2º jogador (nome, apelido e lado de quem criou);
+  tocar numa sala abre a confirmação. A sala sai da lista quando o 2º jogador entra.
+- Quem entra vê o lado de cada um (com o apelido) e toca em **"Aceitar e começar"**.
+- Apelidos aparecem no texto da vez ("Vez de Ana") e no chat; sem apelido, "Onça"/"Cachorros".
 - Uma terceira pessoa vê "Essa sala já tem 2 jogadores".
 - **Sem desfazer** no online. Revanche e "Trocar lados" precisam do aceite do outro.
-- Avisos: adversário desconectado (na faixa da vez) e "Seu adversário saiu".
-- Recarregar a página volta para a mesma sala e partida.
+- **Saiu, caiu ou saiu da tela no meio da partida:** a sala continua guardada. Quem ficou vê
+  "Esperando … 0:59". Depois de 1 minuto aparece "… ainda está jogando?" com **Esperar mais 1 min** /
+  **Encerrar partida**; no máximo +1 minuto. Sem volta: **partida encerrada sem vencedor** e a sala é apagada.
+- **Voltar para a sala:** a tela inicial mostra o cartão "Você estava numa partida online" com
+  **Voltar para a sala** (mesma partida, mesmo ponto) e **Não quero voltar**.
+- **Parado na própria vez:** depois de 1 minuto aparece "Você ainda está jogando?"; sem tocar em "Sim"
+  em 1 minuto, a pessoa sai da sala (pode voltar pelo cartão enquanto o outro espera).
+- Partida terminada + sair: sai de vez e tudo é apagado do servidor.
 - Conexão sem conta: servidor MQTT público gratuito (HiveMQ) com reserva (EMQX);
   só os lances trafegam.
 - Chat só no online: caixinha com as 2 últimas mensagens (canto inferior esquerdo), toque abre o chat completo; criptografia de ponta a ponta (ECDH + AES-GCM); apagado ao sair da sala.
-- Segurança (REG-010): o servidor nunca vê o código da sala (o canal é um resumo PBKDF2) e toda mensagem é assinada (HMAC) com chave tirada do código. Dados guardados no servidor expiram em 6 h e são apagados ao sair.
+- Segurança (REG-010): o servidor nunca vê o código da sala (o canal é um resumo PBKDF2) e toda mensagem é assinada (HMAC) com chave tirada do código. Dados guardados no servidor expiram em 6 h e são apagados quando a partida acaba. Numa sala **pública**, o código, o nome da sala e o apelido de quem criou ficam visíveis na lista (escolha de quem cria).
 
 ## Regras
 - Tabuleiro de 31 pontos: grade 5×5 (alquerque) + toca triangular.

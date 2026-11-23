@@ -44,6 +44,13 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       </div>
       <h1 id="tituloInicio">Jogo da <span>Onça</span></h1>
       <p class="sub">Uma onça contra 14 cachorros: ela caça, eles cercam.</p>
+      <!-- voltar para a partida online (saiu, caiu ou fechou o app; o outro ainda está esperando) -->
+      <div class="retomar" id="cartaoRetomar" hidden>
+        <p class="retomar-titulo">Você estava numa partida online</p>
+        <p class="nota" id="retomarNota">Dá para voltar enquanto o outro jogador espera.</p>
+        <button type="button" class="btn btn-primario btn-grande" id="btnRetomar">Voltar para a sala</button>
+        <button type="button" class="btn btn-fantasma" id="btnEsquecerSala">Não quero voltar</button>
+      </div>
       <div class="pilha">
         <button type="button" class="btn btn-primario btn-grande" id="btnModoIA">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>
@@ -57,7 +64,6 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="7.5" height="14" rx="1.6"/><rect x="14" y="5" width="7.5" height="14" rx="1.6"/><path d="M10.5 12h3"/></svg>
           Jogar online
         </button>
-        <button type="button" class="btn btn-secundario" id="btnRetomar" hidden>Voltar para a sala online</button>
         <div class="linha-fantasma">
           <button type="button" class="btn btn-fantasma" data-abrir="regras">Regras</button>
           <button type="button" class="btn btn-fantasma" data-abrir="painelSom">Som</button>
@@ -129,13 +135,33 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
 
       <div data-etapa="menu">
         <p class="nota">Cada pessoa joga no seu celular. Só 2 jogadores por sala.</p>
+        <label class="rotulo" for="campoApelido">Seu apelido (opcional)</label>
+        <input id="campoApelido" class="campo-texto" type="text" maxlength="12" autocomplete="nickname" spellcheck="false" placeholder="Ex.: Ana">
         <div class="pilha">
           <button type="button" class="btn btn-primario btn-grande" id="btnCriarSala">Criar sala</button>
-          <button type="button" class="btn btn-secundario btn-grande" id="btnIrEntrar">Entrar numa sala</button>
+          <button type="button" class="btn btn-secundario btn-grande" id="btnVerSalas">Salas abertas</button>
+          <button type="button" class="btn btn-secundario" id="btnIrEntrar">Entrar com código</button>
         </div>
       </div>
 
+      <div data-etapa="lista" hidden>
+        <p class="rotulo">Salas abertas</p>
+        <div class="lista-salas" id="listaSalas" role="list" aria-live="polite"></div>
+        <p class="nota" id="listaVazia">Procurando salas…</p>
+      </div>
+
       <div data-etapa="criar" hidden>
+        <label class="rotulo" for="campoNomeSala">Nome da sala (opcional)</label>
+        <input id="campoNomeSala" class="campo-texto" type="text" maxlength="24" spellcheck="false" placeholder="Ex.: Sala da Ana">
+        <p class="rotulo">Quem pode entrar:</p>
+        <div class="opcoes-lado opcoes-visib" role="radiogroup" aria-label="Quem pode entrar">
+          <button type="button" class="lado" role="radio" data-publica="1" aria-checked="true">
+            <strong>Pública</strong><small>aparece na lista de salas</small>
+          </button>
+          <button type="button" class="lado" role="radio" data-publica="0" aria-checked="false">
+            <strong>Privada</strong><small>só com o código ou convite</small>
+          </button>
+        </div>
         <p class="rotulo">Você joga com:</p>
         <div class="opcoes-lado" role="radiogroup" aria-label="Você joga com">
           <button type="button" class="lado" role="radio" data-lado-online="J" aria-checked="true">
@@ -166,7 +192,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errors.pus
       </div>
 
       <div data-etapa="confirmar" hidden>
-        <p class="rotulo">Sala <span id="codigoConfirmar"></span></p>
+        <p class="rotulo">Sala <span id="nomeConfirmar"></span><span id="codigoConfirmar"></span></p>
         <div class="confirmar-lados">
           <p class="lado-info"><svg class="ico" id="icoLadoOutro" viewBox="0 0 64 36" aria-hidden="true"><use href="#ico-onca"/></svg><span>A outra pessoa joga com <b id="ladoOutro">—</b>.</span></p>
           <p class="lado-info voce"><svg class="ico" id="icoLadoMeu" viewBox="0 0 48 36" aria-hidden="true"><use href="#ico-cao"/></svg><span>Você joga com <b id="ladoMeu">—</b>.</span></p>

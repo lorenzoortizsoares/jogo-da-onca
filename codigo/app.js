@@ -303,10 +303,12 @@ function atualizarHud() {
   if (fim) { txt = fim === 'J' ? 'A Onça venceu!' : 'Os Cachorros venceram!'; estado = 'fim'; vez.dataset.lado = fim; }
   else if (cadeia) { txt = 'Continue capturando ou pare'; estado = 'cadeia'; }
   else if (cfg.mode === 'online') {
+    const nomeAdv = sala ? sala.apelidos.adversario : '';
     if (sala && !sala.conectado) { txt = 'Reconectando'; estado = 'pensando'; }
+    else if (espera) { txt = `Esperando ${nomeAdv || 'adversário'} · ${relogioTxt(restaEspera())}`; estado = 'pensando'; }
     else if (humano(S.turn)) txt = `Sua vez (${NOME[S.turn]})`;
     else if (sala && !sala.adversarioOnline) { txt = 'Adversário desconectado'; estado = 'pensando'; }
-    else { txt = `Vez do adversário (${NOME[S.turn]})`; estado = 'pensando'; }
+    else { txt = nomeAdv ? `Vez de ${nomeAdv}` : `Vez do adversário (${NOME[S.turn]})`; estado = 'pensando'; }
   } else if (cfg.mode === 'ai') {
     if (humano(S.turn)) txt = `Sua vez (${NOME[S.turn]})`;
     else { txt = 'Computador pensando'; estado = 'pensando'; }
@@ -601,7 +603,14 @@ for (let k = 0; k < 5; k++) slots.insertAdjacentHTML('beforeend', '<svg viewBox=
 function mostrarTela(id) {
   for (const t of ['telaInicio', 'telaEscolha', 'telaOnline', 'telaPartida']) $(t).hidden = t !== id;
   if (id === 'telaPartida') { const { w, h } = tamanhoPalco(); renderer.setSize(w, h, false); }
-  if (id === 'telaInicio') $('btnRetomar').hidden = !sessaoSalva();
+  if (id === 'telaInicio') mostrarRetomar();
+  if (id !== 'telaOnline') fecharLobby();
+}
+// cartão "Voltar para a sala": saiu, caiu ou fechou o app no meio de uma partida online
+function mostrarRetomar() {
+  const s = sessaoSalva();
+  $('cartaoRetomar').hidden = !s || SELFTEST && !mostrarRetomar.noTeste;
+  if (s) $('retomarNota').textContent = `Sala ${ON.formatarCodigo(s.codigo)} · dá para voltar enquanto o outro jogador espera (até 2 minutos).`;
 }
 function marcarRadios(seletor, ativo) {
   document.querySelectorAll(seletor).forEach((b) => b.setAttribute('aria-checked', String(ativo(b))));
@@ -630,9 +639,17 @@ function trocarVista() {
 }
 function abrir(id) { $(id).hidden = false; const b = $(id).querySelector('button'); if (b) b.focus(); }
 function fecharSobreposicoes() { ['menu', 'regras', 'chat', 'painelSom'].forEach((id) => { $(id).hidden = true; }); }
-function irParaInicio() {
+// opcoes.inativo: saiu porque ficou parado na vez (pergunta "ainda está jogando?" sem resposta)
+function irParaInicio(opcoes) {
   pedido++; ocupado = false; fecharSobreposicoes(); fecharAviso(); $('vitoria').hidden = true;
-  if (sala) { sala.sair(); sala = null; esquecerSessao(); }
+  pararEspera(); perguntaInativo = null;
+  if (sala) {
+    // no meio da partida a saída é temporária: a sala fica guardada e dá para voltar (o outro espera)
+    const temporario = cfg.mode === 'online' && !fim && partidaOnline > 0 && !!sala.info && sala.info.status === 'jogando';
+    sala.sair({ temporario, inativo: !!(opcoes && opcoes.inativo) });
+    sala = null;
+    if (!temporario) esquecerSessao();
+  }
   limparChat();   // privacidade: o chat some do aparelho quando a sala acaba
   mostrarTela('telaInicio');
 }
@@ -645,6 +662,108 @@ let meuId = guardar.ler('id', null);
 if (typeof meuId !== 'string' || meuId.length < 6) { meuId = ON.gerarId(); guardar.gravar('id', meuId); }
 let ladoOnline = 'J';
 const NOME_ART = { J: 'a Onça', D: 'os Cachorros' };
+let apelido = ON.limparNome(guardar.ler('apelido', '') || '');
+let publicaOnline = guardar.ler('publica', true) !== false;
+
+// ---- tempos combinados com o usuário: quem sai (ou cai, ou sai da tela) tem 1 min para voltar; depois
+// quem ficou responde "ainda está jogando?" e espera no máximo mais 1 min; sem volta, encerra sem vencedor.
+// Parado na própria vez: 1 min até "Você ainda está jogando?" e mais 1 min para responder.
+let tempoOnline = { volta: 60000, extra: 60000, inativo: 60000, resposta: 60000 };   // o autoteste encurta
+let espera = null;              // { desde, fase: 'volta' | 'extra' } enquanto o adversário está fora
+let perguntaInativo = null;     // { desde } enquanto pergunto "Você ainda está jogando?"
+let ultimaAtividade = Date.now();
+const relogioTxt = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+function restaEspera() { if (!espera) return 0; return (espera.fase === 'volta' ? tempoOnline.volta : tempoOnline.extra) - (Date.now() - espera.desde); }
+function partidaOnlineRolando() { return cfg.mode === 'online' && !!sala && partidaOnline > 0 && !fim && !!sala.info && sala.info.status === 'jogando'; }
+function iniciarEspera() {
+  if (espera || !partidaOnlineRolando()) return;
+  espera = { desde: Date.now(), fase: 'volta' };
+  atualizarHud();
+}
+function pararEspera(voltou) {
+  if (!espera) return;
+  const nome = sala ? sala.apelidos.adversario : '';
+  if (espera.fase === 'extra' && !$('avisoOnline').hidden && $('avisoOnline').dataset.tipo === 'espera') fecharAviso();
+  espera = null;
+  if (voltou) toast(`${nome || 'Seu adversário'} voltou!`);
+  atualizarHud();
+}
+function encerrarSemVencedor(motivo) {
+  espera = null; perguntaInativo = null;
+  if (sala) { sala.encerrar(); sala = null; }
+  esquecerSessao(); limparChat();
+  ocupado = false; pedido++;
+  mostrarAviso({ titulo: 'Partida encerrada', texto: motivo, sim: 'Ir para o início', aoSim: irParaInicio, tipo: 'encerrada' });
+}
+function marcarAtividade() { ultimaAtividade = Date.now(); }
+// relógio do online (1 vez por segundo): contagem de espera e pergunta de inatividade
+setInterval(() => {
+  if (espera) {
+    if (!partidaOnlineRolando()) { espera = null; }
+    else if (restaEspera() <= 0 && espera.fase === 'volta') {
+      espera = { desde: Date.now(), fase: 'extra' };
+      const nome = sala.apelidos.adversario || 'Seu adversário';
+      mostrarAviso({
+        titulo: `${nome} ainda está jogando?`, texto: 'Saiu há 1 minuto. Dá para esperar mais 1 minuto, no máximo.',
+        sim: 'Esperar mais 1 min', nao: 'Encerrar partida', tipo: 'espera',
+        aoNao: () => encerrarSemVencedor('Você encerrou a partida. Ninguém venceu.'),
+      });
+    } else if (restaEspera() <= 0 && espera.fase === 'extra') {
+      encerrarSemVencedor('Seu adversário não voltou. A partida terminou sem vencedor.');
+      return;
+    }
+    atualizarHud();
+  }
+  // parado na minha vez
+  const minhaVez = partidaOnlineRolando() && humano(S.turn) && !ocupado && !espera && !document.hidden;
+  if (!minhaVez) { if (!perguntaInativo) marcarAtividade(); }
+  else if (!perguntaInativo && Date.now() - ultimaAtividade > tempoOnline.inativo && $('avisoOnline').hidden) {
+    perguntaInativo = { desde: Date.now() };
+    mostrarAviso({
+      titulo: 'Você ainda está jogando?', texto: '', sim: 'Sim, estou jogando', tipo: 'inativo',
+      aoSim: () => { perguntaInativo = null; marcarAtividade(); },
+    });
+  }
+  if (perguntaInativo) {
+    const resta = tempoOnline.resposta - (Date.now() - perguntaInativo.desde);
+    if (resta <= 0) {
+      perguntaInativo = null;
+      irParaInicio({ inativo: true });
+      mostrarAviso({ titulo: 'Você saiu da sala', texto: 'Você ficou parado na sua vez. Dá para voltar para a sala enquanto o outro jogador espera.', sim: 'OK' });
+    } else $('avisoTexto').textContent = `Toque em "Sim" para continuar. Você sai da sala em ${relogioTxt(resta)}.`;
+  }
+}, 500);
+// saiu da tela (trocou de app) ou voltou: o outro fica sabendo na hora
+document.addEventListener('visibilitychange', () => { if (sala) sala.ausente(document.hidden); if (!document.hidden) marcarAtividade(); });
+for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, () => { if (!perguntaInativo) marcarAtividade(); }, { capture: true });
+
+// ---- lista de salas abertas
+let lobby = null;
+function fecharLobby() { if (lobby) { lobby.fechar(); lobby = null; } }
+function irParaLista() {
+  etapaOnline('lista');
+  fecharLobby();
+  $('listaSalas').replaceChildren(); $('listaVazia').textContent = 'Procurando salas…'; $('listaVazia').hidden = false;
+  const l = ON.criarLobby({ criarTransporte: (i) => fabricaTransporte(i) });
+  lobby = l;
+  l.on('salas', (salas) => { if (l === lobby) mostrarLista(salas); });
+  l.abrir().then((salas) => { if (l === lobby) mostrarLista(salas); }, () => { if (l === lobby) erroOnline('Não consegui conectar para ver as salas. Confira a internet.', 'lista'); });
+}
+function mostrarLista(salas) {
+  const lista = $('listaSalas');
+  lista.replaceChildren(...salas.map((m) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'sala-item'; b.setAttribute('role', 'listitem');
+    const t = document.createElement('strong'); t.textContent = m.nome || (m.apelido ? `Sala de ${m.apelido}` : 'Sala sem nome');
+    const d = document.createElement('small');
+    d.textContent = `${m.apelido ? m.apelido + ' joga com ' + NOME_ART[m.lado] + ' · ' : ''}você joga com ${NOME_ART[ON.oposto(m.lado)]}`;
+    b.append(t, d);
+    b.onclick = () => { fecharLobby(); $('campoCodigo').value = ON.formatarCodigo(m.codigo); buscarSala(m.codigo, m.servidor); };
+    return b;
+  }));
+  $('listaVazia').hidden = salas.length > 0;
+  $('listaVazia').textContent = 'Nenhuma sala aberta agora. Crie uma!';
+}
 
 function sessaoSalva() { const s = guardar.ler('sessao', null); return s && ON.codigoValido(s.codigo) ? s : null; }
 function guardarSessao() { if (sala && sala.codigo) guardar.gravar('sessao', { codigo: sala.codigo, servidor: sala.servidor }); }
@@ -655,7 +774,8 @@ function marcarUrlSala() { try { history.replaceState(null, '', linkDaSala()); }
 let timerToast = 0;
 function toast(txt) { const t = $('toast'); t.textContent = txt; t.hidden = false; clearTimeout(timerToast); timerToast = setTimeout(() => { t.hidden = true; }, 2600); }
 let avisoAcoes = {};
-function mostrarAviso({ titulo, texto, sim = 'OK', nao = null, aoSim = null, aoNao = null }) {
+function mostrarAviso({ titulo, texto, sim = 'OK', nao = null, aoSim = null, aoNao = null, tipo = '' }) {
+  $('avisoOnline').dataset.tipo = tipo;
   $('avisoTitulo').textContent = titulo; $('avisoTexto').textContent = texto || '';
   $('avisoSim').textContent = sim; $('avisoNao').hidden = !nao; if (nao) $('avisoNao').textContent = nao;
   avisoAcoes = { aoSim, aoNao };
@@ -668,6 +788,7 @@ $('avisoNao').onclick = () => { const f = avisoAcoes.aoNao; fecharAviso(); if (f
 function etapaOnline(nome, texto) {
   document.querySelectorAll('#telaOnline [data-etapa]').forEach((d) => { d.hidden = d.dataset.etapa !== nome; });
   $('telaOnline').dataset.etapa = nome;
+  if (nome !== 'lista') fecharLobby();
   if (texto) $('textoConectando').textContent = texto;
   $('erroOnline').hidden = true;
 }
@@ -685,7 +806,13 @@ function novaSessao() {
   s.on('estado', aoEstadoOnline);
   s.on('sala', () => { if (s === sala && s.meuLado && s.estado && s.estado.partida !== partidaOnline) aoEstadoOnline({ msg: s.estado }); });
   s.on('conexao', () => { if (s === sala) atualizarHud(); });
-  s.on('presenca', () => { if (s === sala) atualizarHud(); });
+  // adversário saiu da tela / caiu: começa a espera de 1 min (+1 min); voltou: segue o jogo
+  s.on('presenca', (online) => { if (s !== sala) return; if (online) pararEspera(true); else iniciarEspera(); atualizarHud(); });
+  s.on('encerrada', () => {
+    if (s !== sala) return;
+    sala.fechar(); sala = null; espera = null; perguntaInativo = null; esquecerSessao(); limparChat();
+    mostrarAviso({ titulo: 'Partida encerrada', texto: 'O outro jogador encerrou a partida porque você ficou fora por muito tempo. Ninguém venceu.', sim: 'Ir para o início', aoSim: irParaInicio, tipo: 'encerrada' });
+  });
   s.on('pedido-revanche', ({ trocar }) => {
     if (s !== sala) return;
     mostrarAviso({
@@ -694,9 +821,14 @@ function novaSessao() {
     });
   });
   s.on('resposta-revanche', ({ aceitar }) => { if (s === sala && !aceitar) mostrarAviso({ titulo: 'Sem revanche', texto: 'Seu adversário não quis jogar de novo agora.' }); });
-  s.on('saiu', () => { if (s === sala) mostrarAviso({ titulo: 'Seu adversário saiu', texto: 'A partida online terminou.', sim: 'Ir para o início', aoSim: irParaInicio }); });
+  s.on('saiu', (x) => {
+    if (s !== sala) return;
+    if (x && x.temporario && partidaOnlineRolando()) { iniciarEspera(); if (x.inativo) toast(`${s.apelidos.adversario || 'Seu adversário'} ficou parado e saiu. Esperando voltar…`); return; }
+    mostrarAviso({ titulo: 'Seu adversário saiu', texto: 'A partida online terminou.', sim: 'Ir para o início', aoSim: irParaInicio });
+  });
   s.on('chat', (m) => { if (s === sala) adicionarChat(m); });
   limparChat();
+  espera = null; perguntaInativo = null; marcarAtividade();
   sala = s;
   return s;
 }
@@ -747,11 +879,13 @@ async function criarSalaOnline() {
   etapaOnline('conectando', 'Criando a sala…');
   const s = novaSessao();
   try {
-    const r = await s.criar(ladoOnline);
+    const nomeSala = ON.limparNome($('campoNomeSala').value, ON.LIMITE_NOME_SALA) || (apelido ? `Sala de ${apelido}` : '');
+    const r = await s.criar(ladoOnline, null, { apelido, nomeSala, publica: publicaOnline });
     if (s !== sala) return;
     guardarSessao(); marcarUrlSala();
     $('codigoSala').textContent = ON.formatarCodigo(r.codigo);
-    $('notaAguardando').textContent = `Você joga com ${NOME_ART[ladoOnline]}. Mande o convite (ou o código) para a outra pessoa.`;
+    $('notaAguardando').textContent = `Você joga com ${NOME_ART[ladoOnline]}. ` +
+      (publicaOnline ? 'A sala aparece na lista de salas abertas; você também pode mandar o convite.' : 'Sala privada: mande o convite (ou o código) para a outra pessoa.');
     etapaOnline('aguardando');
   } catch (e) {
     erroOnline('Não consegui conectar ao servidor. Confira a internet e tente de novo.', 'criar');
@@ -767,12 +901,18 @@ async function buscarSala(codigoDigitado, servidorDoLink) {
   let r;
   try { r = await s.consultar(codigo, preferido); } catch (e) { r = { existe: false, erro: true }; }
   if (s !== sala) return;
-  if (!r.existe) { erroOnline(r.erro ? 'Não consegui conectar. Confira a internet.' : 'Sala não encontrada. Confira o código.', 'entrar'); return; }
+  if (!r.existe) {
+    // era a minha partida e a sala sumiu: o outro encerrou (ou passou do tempo de 6 h)
+    if (!r.erro && salvo && salvo.codigo === codigo) { esquecerSessao(); erroOnline('Essa partida já foi encerrada (o outro jogador não pôde esperar mais).', 'menu'); return; }
+    erroOnline(r.erro ? 'Não consegui conectar. Confira a internet.' : 'Sala não encontrada. Confira o código.', 'entrar'); return;
+  }
   if (r.souJogador) { etapaOnline('conectando', 'Voltando para a partida…'); if (s.estado) aoEstadoOnline({ msg: s.estado }); return; }
   if (r.cheia) { erroOnline('Essa sala já tem 2 jogadores.', 'entrar'); return; }
   $('codigoConfirmar').textContent = ON.formatarCodigo(codigo);
+  $('nomeConfirmar').textContent = (r.info && r.info.nome) || '';
   const outro = r.ladoCriador, eu = ON.oposto(outro);
-  $('ladoOutro').textContent = NOME_ART[outro]; $('ladoMeu').textContent = NOME_ART[eu];
+  const nomeOutro = r.info && r.info.criador && r.info.criador.apelido;
+  $('ladoOutro').textContent = NOME_ART[outro] + (nomeOutro ? ` (${nomeOutro})` : ''); $('ladoMeu').textContent = NOME_ART[eu];
   $('icoLadoOutro').innerHTML = outro === 'J' ? '<use href="#ico-onca"/>' : '<use href="#ico-cao"/>';
   $('icoLadoMeu').innerHTML = eu === 'J' ? '<use href="#ico-onca"/>' : '<use href="#ico-cao"/>';
   $('icoLadoOutro').setAttribute('viewBox', outro === 'J' ? '0 0 64 36' : '0 0 48 36');
@@ -783,7 +923,7 @@ async function aceitarSala() {
   if (!sala) return;
   const s = sala;
   etapaOnline('conectando', 'Entrando na sala…');
-  try { await s.entrar(); guardarSessao(); }
+  try { await s.entrar(undefined, apelido); guardarSessao(); }
   catch (e) { if (s === sala) erroOnline(/cheia/.test(e.message) ? 'Essa sala já tem 2 jogadores.' : 'A sala não respondeu. Tente de novo.', 'entrar'); }
 }
 async function compartilharConvite() {
@@ -801,7 +941,8 @@ function linhaChat(m) {
   const p = document.createElement('p');
   p.className = 'msg' + (m.meu ? ' meu' : '');
   const b = document.createElement('b');
-  b.textContent = `${NOME[m.lado] || '?'}${m.meu ? ' (você)' : ''}: `;
+  const ap = sala ? sala.apelidos : { meu: '', adversario: '' };
+  b.textContent = `${(m.meu ? ap.meu : ap.adversario) || NOME[m.lado] || '?'}${m.meu ? ' (você)' : ''}: `;   // apelido, ou Onça/Cachorros
   const t = document.createElement('span');
   t.textContent = m.texto;                         // sempre texto puro: nunca vira HTML
   p.append(b, t);
@@ -832,7 +973,13 @@ $('chatForm').addEventListener('submit', async (e) => {
 });
 
 $('btnModoOnline').onclick = () => irParaOnline('menu');
-$('btnRetomar').onclick = () => { const s = sessaoSalva(); if (s) { irParaOnline('entrar'); $('campoCodigo').value = ON.formatarCodigo(s.codigo); buscarSala(s.codigo); } };
+$('btnRetomar').onclick = () => { const s = sessaoSalva(); if (s) { irParaOnline('entrar'); $('campoCodigo').value = ON.formatarCodigo(s.codigo); buscarSala(s.codigo, s.servidor); } };
+$('btnEsquecerSala').onclick = () => { esquecerSessao(); mostrarRetomar(); };
+$('campoApelido').value = apelido;
+$('campoApelido').addEventListener('input', () => { apelido = ON.limparNome($('campoApelido').value); guardar.gravar('apelido', apelido); });
+document.querySelectorAll('[data-publica]').forEach((b) => { b.onclick = () => { publicaOnline = b.dataset.publica === '1'; guardar.gravar('publica', publicaOnline); marcarRadios('[data-publica]', (x) => (x.dataset.publica === '1') === publicaOnline); }; });
+marcarRadios('[data-publica]', (x) => (x.dataset.publica === '1') === publicaOnline);
+$('btnVerSalas').onclick = irParaLista;
 $('btnCriarSala').onclick = () => etapaOnline('criar');
 $('btnIrEntrar').onclick = () => { etapaOnline('entrar'); setTimeout(() => $('campoCodigo').focus(), 50); };
 document.querySelectorAll('[data-lado-online]').forEach((b) => { b.onclick = () => { ladoOnline = b.dataset.ladoOnline; marcarRadios('[data-lado-online]', (x) => x.dataset.ladoOnline === ladoOnline); }; });
@@ -1026,7 +1173,7 @@ if (SELFTEST) {
 } else if (qs.get('tela') === 'escolha-ia') irParaEscolha('ai');
 else if (qs.get('tela') === 'escolha-2j') irParaEscolha('pvp');
 else if (qs.get('tela') === 'online') irParaOnline(qs.get('etapa') || 'menu');
-$('btnRetomar').hidden = !sessaoSalva() || SELFTEST;
+mostrarRetomar();
 
 // ---------------------------------------------------------------- autoteste (?selftest=1)
 // Roda a interface de verdade: cliques sintéticos passam pelo mesmo caminho do toque.
@@ -1217,12 +1364,12 @@ async function autoteste() {
     comecar();
     await dormir(20);
     check('REG-003 texto da vez inteiro (computador pensando)', !cortado(), $('status').textContent);
-    const jogou = await esperar(() => S.turn === 'D' && !window.__onca.isBusy(), 15000);
+    const jogou = await esperar(() => S.turn === 'D' && !window.__onca.isBusy(), 120000);
     check('computador (onça) joga primeiro quando você é os cachorros', jogou && S.ply === 1 && $('status').textContent === 'Sua vez (Cachorros)', { ply: S.ply, status: $('status').textContent });
     // humano move um cachorro -> computador responde
     const mv = L.dogMoves(S)[0];
     clicarPonto(mv.from); clicarPonto(mv.to);
-    const resp = await esperar(() => S.turn === 'D' && S.ply === 3 && !window.__onca.isBusy(), 15000);
+    const resp = await esperar(() => S.turn === 'D' && S.ply === 3 && !window.__onca.isBusy(), 120000);
     check('computador responde ao seu lance', resp, { ply: S.ply });
     desfazer(); await dormir(30);
     check('desfazer contra o computador volta para a sua vez', S.turn === 'D' && S.ply === 1);
@@ -1236,7 +1383,7 @@ async function autoteste() {
     $('btnModoOnline').click(); $('btnCriarSala').click();
     document.querySelector('[data-lado-online="J"]').click();
     $('btnConfirmarCriar').click();
-    await esperar(() => $('telaOnline').dataset.etapa === 'aguardando', 15000);   // REG-012: tempo virtual
+    await esperar(() => $('telaOnline').dataset.etapa === 'aguardando', 120000);   // REG-012: tempo virtual
     const codigo = sala && sala.codigo;
     check('online: criar sala mostra o código', ON.codigoValido(codigo) && $('codigoSala').textContent === ON.formatarCodigo(codigo), $('codigoSala').textContent);
     check('REG-002 layout: tela da sala criada cabe na tela', vazamentos().length === 0, vazamentos());
@@ -1244,7 +1391,7 @@ async function autoteste() {
     const info = await conv.consultar(codigo);
     check('online: quem entra vê que a outra pessoa é a Onça e fica com os Cachorros', info.existe && info.status === 'aguardando' && info.ladoCriador === 'J' && info.meuLado === 'D', info);
     await conv.entrar(3000);
-    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 15000);   // REG-012: tempo virtual
+    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 120000);   // REG-012: tempo virtual
     check('online: a partida começa nos dois lados', !$('telaPartida').hidden && conv.meuLado === 'D' && sala.meuLado === 'J' && $('status').textContent === 'Sua vez (Onça)', $('status').textContent);
     // REG-006: logo ao entrar aparecia "Adversário desconectado" até a 1ª batida periódica (8 s no jogo real)
     await esperar(() => sala.adversarioOnline && conv.adversarioOnline, 100);
@@ -1253,7 +1400,7 @@ async function autoteste() {
     check('online: sem botão Desfazer', $('btnDesfazer').hidden && !podeDesfazer());
 
     // CHAT criptografado de ponta a ponta
-    await esperar(() => sala.chatPronto && conv.chatPronto, 15000);   // REG-012: tempo virtual
+    await esperar(() => sala.chatPronto && conv.chatPronto, 120000);   // REG-012: tempo virtual
     check('chat: chave secreta combinada nos dois celulares', sala.chatPronto && conv.chatPronto, { eu: sala._diag(), conv: conv._diag() });
     check('chat: caixinha aparece no canto inferior esquerdo', !$('miniChat').hidden && (() => { const r = $('miniChat').getBoundingClientRect(); return r.left < 40 && r.bottom > window.innerHeight * 0.6; })());
     const recebidasRobo = [];
@@ -1261,7 +1408,7 @@ async function autoteste() {
     $('miniChat').click(); await dormir(60);
     check('chat: tocar na caixinha abre o chat completo', !$('chat').hidden);
     $('chatTexto').value = 'Boa sorte!'; $('chatForm').requestSubmit();
-    await esperar(() => recebidasRobo.length === 1, 15000);   // REG-012: tempo virtual
+    await esperar(() => recebidasRobo.length === 1, 120000);   // REG-012: tempo virtual
     check('chat: minha mensagem chega decifrada no outro celular', recebidasRobo.length === 1 && recebidasRobo[0].texto === 'Boa sorte!' && recebidasRobo[0].lado === 'J', recebidasRobo);
     const noServidor = broker.publicacoes.filter((p) => p.topico.endsWith('/chat'));
     check('cripto: no servidor só passa texto embaralhado (sem o texto, sem nomes)', noServidor.length >= 1 && noServidor.every((p) => {
@@ -1269,10 +1416,10 @@ async function autoteste() {
       return !bruto.includes('Boa sorte') && Object.keys(p.msg).sort().join() === 'ct,id,iv,mac' && !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG;
     }), noServidor.map((p) => p.msg));
     await conv.enviarChat('<img src=x onerror="window.__xss=1"><b>oi</b>');
-    await esperar(() => historicoChat.length === 2, 15000);   // REG-012: tempo virtual
+    await esperar(() => historicoChat.length === 2, 120000);   // REG-012: tempo virtual
     check('segurança: texto com código vira só texto (nada é executado)', !document.querySelector('#miniChat img, #chatLista img, #chatLista b b') && !window.__xss && $('chatLista').textContent.includes('<img src=x'), $('chatLista').textContent);
     for (let k = 1; k <= 4; k++) await conv.enviarChat('msg ' + k);
-    await esperar(() => historicoChat.length === 6, 15000);   // REG-012: tempo virtual
+    await esperar(() => historicoChat.length === 6, 120000);   // REG-012: tempo virtual
     check('chat: a caixinha mostra só as últimas 2; o chat completo mostra todas', $('miniLista').children.length === 2 && $('chatLista').children.length === 6, [$('miniLista').children.length, $('chatLista').children.length]);
     check('chat: nome Onça/Cachorros em cada mensagem', $('miniLista').lastElementChild.textContent === 'Cachorros: msg 4' && $('chatLista').firstElementChild.textContent === 'Onça (você): Boa sorte!', [$('miniLista').lastElementChild.textContent, $('chatLista').firstElementChild.textContent]);
     check('chat: mensagem longa demais é recusada', (await sala.enviarChat('x'.repeat(ON.LIMITE_CHAT + 1))).motivo === 'longo');
@@ -1284,12 +1431,12 @@ async function autoteste() {
     check('REG-003 texto da vez inteiro (online)', !cortado(), $('status').textContent);
     // meu lance chega ao adversário
     clicarPonto(12); clicarPonto(17); await ocioso();
-    await esperar(() => conv.estado && conv.estado.seq === 1, 15000);   // REG-012: tempo virtual
+    await esperar(() => conv.estado && conv.estado.seq === 1, 120000);   // REG-012: tempo virtual
     check('online: meu lance chega ao adversário', conv.estado && conv.estado.seq === 1 && conv.estado.lance.type === 'step' && conv.estado.lance.to === 17 && conv.estado.estado.jaguar === 17, conv.estado && conv.estado.lance);
     check('online: na vez do adversário eu não mexo', (() => { const k = L.positionKey(S); clicarPonto(11); clicarPonto(16); return L.positionKey(S) === k; })());
     // lance do adversário chega e anima aqui
     conv.jogar({ type: 'dog', from: 11, to: 16 }, L.applyDogMove(conv.estado.estado, 11, 16));
-    await esperar(() => S.board[16] === 1 && !window.__onca.isBusy(), 15000);   // REG-012: tempo virtual
+    await esperar(() => S.board[16] === 1 && !window.__onca.isBusy(), 120000);   // REG-012: tempo virtual
     check('online: lance do adversário aparece no meu tabuleiro', S.board[16] === 1 && S.board[11] === 0 && caoEm[16] && perto(caoEm[16], 16) && S.turn === 'J' && seqOnline === 2, { seq: seqOnline, status: $('status').textContent });
     // terceira pessoa não entra
     const intruso = robo('robo-intruso');
@@ -1312,20 +1459,20 @@ async function autoteste() {
     b3[22] = 2;
     const posC = Object.assign({}, L.initialState(), { board: b3, jaguar: 22, captured: 0, turn: 'J', ply: 10 });
     conv.jogar({ type: 'dog', from: 16, to: 11 }, posC);   // força a posição (lance não confere -> sincroniza)
-    await esperar(() => S.jaguar === 22 && seqOnline === 4, 15000);   // REG-012: tempo virtual
+    await esperar(() => S.jaguar === 22 && seqOnline === 4, 120000);   // REG-012: tempo virtual
     clicarPonto(22); clicarPonto(12); await ocioso(); clicarPonto(2); await ocioso();
-    await esperar(() => conv.estado && conv.estado.seq === 5, 15000);   // REG-012: tempo virtual
+    await esperar(() => conv.estado && conv.estado.seq === 5, 120000);   // REG-012: tempo virtual
     check('online: captura em cadeia chega inteira (2 pulos)', conv.estado && conv.estado.lance.type === 'capture' && conv.estado.lance.captured.length === 2 && conv.estado.estado.captured === 2, conv.estado && conv.estado.lance);
     // adversário cai e volta
     conv._transporte().cair();
-    await esperar(() => $('vez').dataset.rede === 'off', 15000);   // REG-012: tempo virtual
+    await esperar(() => $('vez').dataset.rede === 'off', 120000);   // REG-012: tempo virtual
     check('online: aviso quando o adversário cai', $('vez').dataset.rede === 'off');
     conv._transporte().voltar();
-    await esperar(() => $('vez').dataset.rede === 'on', 15000);   // REG-012: tempo virtual
+    await esperar(() => $('vez').dataset.rede === 'on', 120000);   // REG-012: tempo virtual
     check('online: aviso some quando ele volta', $('vez').dataset.rede === 'on');
     // adversário sai
     conv.sair();
-    await esperar(() => !$('avisoOnline').hidden, 15000);   // REG-012: tempo virtual
+    await esperar(() => !$('avisoOnline').hidden, 120000);   // REG-012: tempo virtual
     check('online: aviso quando o adversário sai', !$('avisoOnline').hidden && /saiu/.test($('avisoTitulo').textContent), $('avisoTitulo').textContent);
     $('avisoSim').click(); await dormir(30);
     check('online: "Ir para o início" fecha a sala', !$('telaInicio').hidden && sala === null);
@@ -1340,24 +1487,116 @@ async function autoteste() {
     const criador = robo('robo-criador');
     const rc = await criador.criar('D');
     $('campoCodigo').value = rc.codigo.toLowerCase(); $('btnBuscarSala').click();
-    await esperar(() => $('telaOnline').dataset.etapa === 'confirmar', 15000);   // REG-012: tempo virtual
+    await esperar(() => $('telaOnline').dataset.etapa === 'confirmar', 120000);   // REG-012: tempo virtual
     check('online: confirmação mostra que eu sou a Onça', $('ladoMeu').textContent === 'a Onça' && $('ladoOutro').textContent === 'os Cachorros', [$('ladoMeu').textContent, $('ladoOutro').textContent]);
     check('REG-002 layout: confirmação cabe na tela', vazamentos().length === 0, vazamentos());
     $('btnAceitar').click();
-    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 15000);   // REG-012: tempo virtual
+    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1, 120000);   // REG-012: tempo virtual
     check('online: aceitar começa a partida (eu = Onça)', !$('telaPartida').hidden && sala && sala.meuLado === 'J' && $('status').textContent === 'Sua vez (Onça)', $('status').textContent);
     await esperar(() => sala.adversarioOnline && criador.adversarioOnline, 100);
     check('REG-006 adversário aparece conectado logo ao aceitar (convidado e criador)', sala.adversarioOnline && criador.adversarioOnline && $('vez').dataset.rede === 'on',
       { eu: sala._diag(), criador: criador._diag() });
     // revanche trocando de lado (pedido do outro, eu aceito)
     criador.pedirRevanche(true);
-    await esperar(() => !$('avisoOnline').hidden, 15000);   // REG-012: tempo virtual
+    await esperar(() => !$('avisoOnline').hidden, 120000);   // REG-012: tempo virtual
     check('online: pedido de revanche aparece', !$('avisoOnline').hidden && /Revanche/.test($('avisoTitulo').textContent));
     $('avisoSim').click();
-    await esperar(() => partidaOnline === 2 && sala.meuLado === 'D', 15000);   // REG-012: tempo virtual
+    await esperar(() => partidaOnline === 2 && sala.meuLado === 'D', 120000);   // REG-012: tempo virtual
     check('online: revanche trocando de lado (agora eu sou os Cachorros)', partidaOnline === 2 && sala.meuLado === 'D' && criador.meuLado === 'J' && $('status').textContent === 'Vez do adversário (Onça)',
       { status: $('status').textContent, advOnline: sala.adversarioOnline, conectado: sala.conectado, papel: sala.papel, criadorConectado: criador.conectado, eu: sala._diag(), robo: criador._diag() });
-    criador.fechar();
+    // ===== saída, queda e volta (pedido do usuário: 1 min para voltar + pergunta + no máximo mais 1 min)
+    const tempoAntes = tempoOnline;
+    // REG-017: prazos longos nos passos em que o prazo NÃO deve acabar (o tempo virtual do teste corre na frente
+    // enquanto a criptografia trabalha); curtos só nos passos que testam o prazo acabando
+    tempoOnline = { volta: 20000, extra: 20000, inativo: 60000, resposta: 60000 };
+    criador.ausente(true);   // o outro trocou de app (saiu da tela)
+    await esperar(() => /^Esperando /.test($('status').textContent), 120000);
+    check('espera: quando o outro sai da tela, aparece "Esperando … 0:XX" (sem "desconectado" na hora)', /^Esperando adversário · 0:\d\d$/.test($('status').textContent) && $('vez').dataset.rede === 'off', $('status').textContent);
+    check('REG-003 texto da vez inteiro (esperando o adversário)', !cortado(), $('status').textContent);
+    criador.ausente(false);
+    await esperar(() => !espera, 120000);
+    check('espera: quando o outro volta, o jogo segue e avisa "voltou"', !espera && /voltou/.test($('toast').textContent) && $('vez').dataset.rede === 'on' && $('avisoOnline').hidden, { status: $('status').textContent, toast: $('toast').textContent });
+    // saiu "de verdade" no meio da partida (fechou o app / tocou em Sair) e voltou pela sala guardada
+    criador.sair({ temporario: true });
+    await esperar(() => !!espera, 120000);
+    check('espera: "Sair" no meio da partida também espera a volta (não encerra)', !!espera && $('avisoOnline').hidden && sala && partidaOnline === 2, { espera, aviso: $('avisoTitulo').textContent });
+    const criador2 = robo('robo-criador');
+    const volta2 = await criador2.reconectar(rc.codigo);
+    await esperar(() => !espera && !!sala && sala.adversarioOnline, 120000);
+    check('voltar: o outro volta para a mesma partida e a espera acaba', volta2.ok && !espera && criador2.estado && criador2.estado.partida === 2 && criador2.meuLado === 'J', { volta2, espera });
+    // não voltou: depois de 1 min pergunta "ainda está jogando?"; esperando +1 min sem volta, encerra sem vencedor
+    tempoOnline.volta = 1500; tempoOnline.extra = 1500;   // agora sim: testar o prazo acabando
+    criador2._transporte().cair();
+    await esperar(() => !$('avisoOnline').hidden && $('avisoOnline').dataset.tipo === 'espera', 120000);
+    check('espera: depois do 1º minuto pergunta se o outro ainda está jogando', !$('avisoOnline').hidden && /ainda está jogando\?/.test($('avisoTitulo').textContent) && $('avisoSim').textContent === 'Esperar mais 1 min' && $('avisoNao').textContent === 'Encerrar partida', $('avisoTitulo').textContent);
+    check('REG-002 layout: pergunta "ainda está jogando?" cabe na tela', vazamentos().length === 0, vazamentos());
+    $('avisoSim').click();
+    await esperar(() => $('avisoOnline').dataset.tipo === 'encerrada' && !$('avisoOnline').hidden, 120000);
+    const sobrasEnc = Object.keys(broker.retidos).filter((k) => k.indexOf(rc.topico) === 0 && !/presenca/.test(k));
+    check('espera: sem volta no minuto extra, a partida encerra sem vencedor e a sala some do servidor', /encerrada/.test($('avisoTitulo').textContent) && /sem vencedor/.test($('avisoTexto').textContent) && sala === null && !sessaoSalva() && sobrasEnc.length === 0, { titulo: $('avisoTitulo').textContent, sobrasEnc });
+    $('avisoSim').click(); await dormir(30);
+    check('espera: "Ir para o início" depois de encerrar', !$('telaInicio').hidden);
+    criador2.fechar(); criador.fechar();
+    tempoOnline.volta = 20000; tempoOnline.extra = 20000;   // REG-017: de volta aos prazos longos
+
+    // ===== lista de salas, apelidos e nome da sala
+    const criador3 = robo('robo-rui');
+    const rc3 = await criador3.criar('D', null, { apelido: 'Rui', nomeSala: 'Mesa do Rui', publica: true });
+    const salaPrivada = robo('robo-priv');
+    await salaPrivada.criar('J', null, { apelido: 'Zé', nomeSala: 'Só convidados', publica: false });
+    irParaOnline('menu');
+    $('campoApelido').value = 'Lia'; $('campoApelido').dispatchEvent(new Event('input'));
+    check('REG-002 layout: menu online com apelido cabe na tela', vazamentos().length === 0, vazamentos());
+    $('btnVerSalas').click();
+    await esperar(() => $('listaSalas').children.length >= 1, 120000);
+    const itemRui = [...$('listaSalas').children].find((b) => /Mesa do Rui/.test(b.textContent));
+    check('lista: sala pública aparece com nome, apelido e o lado de cada um', !!itemRui && /Rui joga com os Cachorros/.test(itemRui.textContent) && /você joga com a Onça/.test(itemRui.textContent), itemRui && itemRui.textContent);
+    check('lista: sala privada não aparece na lista', ![...$('listaSalas').children].some((b) => /Só convidados/.test(b.textContent)));
+    check('REG-002 layout: lista de salas cabe na tela', vazamentos().length === 0, vazamentos());
+    itemRui.click();
+    await esperar(() => $('telaOnline').dataset.etapa === 'confirmar', 120000);
+    check('lista: tocar na sala abre a confirmação com o nome da sala e de quem criou', $('nomeConfirmar').textContent === 'Mesa do Rui' && $('ladoOutro').textContent === 'os Cachorros (Rui)' && $('ladoMeu').textContent === 'a Onça', [$('nomeConfirmar').textContent, $('ladoOutro').textContent]);
+    $('btnAceitar').click();
+    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1 && criador3.apelidos.adversario === 'Lia', 120000);
+    check('apelido: quem criou vê o meu apelido e a sala sai da lista', criador3.apelidos.adversario === 'Lia' && sala.apelidos.adversario === 'Rui' && !Object.keys(broker.retidos).some((k) => k.indexOf(ON.LOBBY) === 0 && broker.retidos[k] && broker.retidos[k].codigo === rc3.codigo), criador3.apelidos);
+    await esperar(() => !!sala && sala.chatPronto && criador3.chatPronto, 120000);
+    await criador3.enviarChat('oi, Lia!');
+    await esperar(() => historicoChat.length === 1, 120000);
+    check('apelido: o chat mostra o apelido no lugar de Onça/Cachorros', $('miniLista').lastElementChild && $('miniLista').lastElementChild.textContent === 'Rui: oi, Lia!', $('miniLista').textContent);
+    // parado na minha vez: pergunta "Você ainda está jogando?"
+    tempoOnline.inativo = 1500; tempoOnline.resposta = 1500;   // agora sim: testar a pergunta de inatividade
+    marcarAtividade();   // como se a pessoa tivesse acabado de tocar na tela
+    check('inativo: na minha vez, ainda sem pergunta logo no começo', $('avisoOnline').hidden && $('status').textContent === 'Sua vez (Onça)', $('status').textContent);
+    await esperar(() => !$('avisoOnline').hidden && $('avisoOnline').dataset.tipo === 'inativo', 120000);
+    check('inativo: parado na vez, pergunta "Você ainda está jogando?" com contagem', /ainda está jogando\?/.test($('avisoTitulo').textContent) && /sai da sala em 0:0\d/.test($('avisoTexto').textContent), [$('avisoTitulo').textContent, $('avisoTexto').textContent]);
+    $('avisoSim').click(); await dormir(50);
+    check('inativo: "Sim" continua a partida', $('avisoOnline').hidden && perguntaInativo === null && sala && !$('telaPartida').hidden);
+    let saiuInativo = null; criador3.on('saiu', (x) => { saiuInativo = x; });
+    await esperar(() => !$('telaInicio').hidden, 120000);
+    await esperar(() => !!saiuInativo, 120000);   // a mensagem ainda está a caminho do outro celular
+    check('inativo: sem resposta, sai da sala (temporário) e o outro é avisado do motivo', !$('telaInicio').hidden && /Você saiu da sala/.test($('avisoTitulo').textContent) && saiuInativo && saiuInativo.inativo && saiuInativo.temporario && !!sessaoSalva(), { saiuInativo, titulo: $('avisoTitulo').textContent });
+    tempoOnline.inativo = 60000; tempoOnline.resposta = 60000;   // REG-017: de volta aos prazos longos
+    $('avisoSim').click(); await dormir(30);
+    mostrarRetomar.noTeste = true; mostrarRetomar();
+    check('voltar: a tela inicial mostra "Voltar para a sala"', !$('cartaoRetomar').hidden && /dá para voltar/.test($('retomarNota').textContent));
+    check('REG-002 layout: tela inicial com "Voltar para a sala" cabe na tela', vazamentos().length === 0, vazamentos());
+    const antesVolta = L.positionKey(S);
+    $('btnRetomar').click();
+    await esperar(() => !$('telaPartida').hidden && partidaOnline === 1 && sala && sala.adversarioOnline, 120000);
+    check('voltar: "Voltar para a sala" leva para a mesma partida', !$('telaPartida').hidden && L.positionKey(S) === antesVolta && sala.meuLado === 'J' && $('status').textContent === 'Sua vez (Onça)', { status: $('status').textContent });
+    await esperar(() => criador3.adversarioOnline, 120000);
+    check('voltar: o outro me vê de volta', criador3.adversarioOnline);
+    // sair pelo menu no meio da partida: dá para voltar; "Não quero voltar" esquece
+    let saiuMenu = null; criador3.on('saiu', (x) => { saiuMenu = x; });
+    $('btnSairSala').click();
+    await esperar(() => !!saiuMenu, 120000);
+    check('sair pelo menu no meio da partida: o outro espera a volta e eu vejo "Voltar para a sala"', saiuMenu && saiuMenu.temporario === true && !$('cartaoRetomar').hidden, saiuMenu);
+    $('btnEsquecerSala').click(); await dormir(30);
+    check('"Não quero voltar" some com o cartão', $('cartaoRetomar').hidden && !sessaoSalva());
+    mostrarRetomar.noTeste = false;
+    criador3.encerrar(); salaPrivada.sair(); criador3.fechar();
+    tempoOnline = tempoAntes;
+    $('campoApelido').value = ''; $('campoApelido').dispatchEvent(new Event('input'));
     fabricaTransporte = (i) => ON.criarTransporteMqtt(ON.SERVIDORES[i]); opcoesSala = {};
 
     // telas
@@ -1395,7 +1634,7 @@ async function roboTestador(semente, partidas) {
   let passos = 0, lances = 0, partidaAtual = 0, jsVistos = window.__errors.length;
   const fins = { J: 0, D: 0, semFim: 0 };
   const anotar = (onde, oque, extra) => { if (erros.length < 60) erros.push({ partida: partidaAtual, passo: passos, onde, oque, extra: extra === undefined ? '' : extra, estado: L.positionKey(S) }); };
-  const esperar = async (cond, ms = 20000) => { const t = performance.now(); while (!cond() && performance.now() - t < ms) await dormir(25); return cond(); };
+  const esperar = async (cond, ms = 120000) => { const t = performance.now(); while (!cond() && performance.now() - t < ms) await dormir(25); return cond(); };   // REG-017
   const ocioso = () => esperar(() => !window.__onca.isBusy());
 
   async function conferir(onde) {
@@ -1470,6 +1709,7 @@ async function roboTestador(semente, partidas) {
     } else if (r < 0.20) { clicarPonto(Math.floor(rnd() * L.N)); await ocioso(); }   // toque aleatório (pode ser inválido)
     else if (online && r < 0.23) await online.cair();
     else if (online && r < 0.25) await online.recarregar();
+    else if (online && r < 0.27) await online.advFora();
     if (!$('menu').hidden || !$('painelSom').hidden || !$('regras').hidden) { fecharSobreposicoes(); await dormir(20); }
   }
 
@@ -1479,13 +1719,33 @@ async function roboTestador(semente, partidas) {
     fabricaTransporte = () => broker.criarTransporte();
     opcoesSala = { batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 };
     const adv = ON.criarSala({ id: 'robo-adv-' + partidaAtual, criarTransporte: () => broker.criarTransporte(), initialState: () => L.initialState(), batidaMs: 150, ausenciaMs: 700, esperaSalaMs: 300, iteracoesSala: 1000 });
-    ladoOnline = rnd() < 0.5 ? 'J' : 'D';
-    irParaOnline('menu'); $('btnCriarSala').click();
-    document.querySelector(`[data-lado-online="${ladoOnline}"]`).click(); $('btnConfirmarCriar').click();
-    if (!(await esperar(() => $('telaOnline').dataset.etapa === 'aguardando'))) { anotar('online', 'criar sala não terminou', $('telaOnline').dataset.etapa); return null; }
-    const codigo = sala.codigo;
-    const c = await adv.consultar(codigo); if (!c.existe) { anotar('online', 'adversário não achou a sala'); return null; }
-    await adv.entrar(15000);
+    let codigo;
+    if (rnd() < 0.5) {
+      // eu crio a sala pela interface (pública ou privada, com ou sem apelido)
+      ladoOnline = rnd() < 0.5 ? 'J' : 'D';
+      irParaOnline('menu');
+      $('campoApelido').value = rnd() < 0.5 ? 'Robô ' + partidaAtual : ''; $('campoApelido').dispatchEvent(new Event('input'));
+      $('btnCriarSala').click();
+      document.querySelector(`[data-publica="${rnd() < 0.5 ? 1 : 0}"]`).click();
+      document.querySelector(`[data-lado-online="${ladoOnline}"]`).click(); $('btnConfirmarCriar').click();
+      if (!(await esperar(() => $('telaOnline').dataset.etapa === 'aguardando'))) { anotar('online', 'criar sala não terminou', $('telaOnline').dataset.etapa); return null; }
+      if (vazamentos().length) anotar('online', 'tela da sala criada sai da tela', vazamentos());
+      codigo = sala.codigo;
+      const c = await adv.consultar(codigo); if (!c.existe) { anotar('online', 'adversário não achou a sala'); return null; }
+      await adv.entrar(120000, rnd() < 0.5 ? 'Rival' : '');
+    } else {
+      // o adversário cria uma sala pública e eu entro pela lista de salas abertas
+      const ladoAdv = rnd() < 0.5 ? 'J' : 'D';
+      const rAdv = await adv.criar(ladoAdv, null, { apelido: 'Rival', nomeSala: 'Mesa ' + partidaAtual, publica: true });
+      codigo = rAdv.codigo; ladoOnline = ON.oposto(ladoAdv);
+      irParaOnline('menu'); $('btnVerSalas').click();
+      const achou = await esperar(() => [...$('listaSalas').children].some((b) => b.textContent.includes('Mesa ' + partidaAtual)));
+      if (!achou) { anotar('online', 'sala pública não apareceu na lista', $('listaSalas').textContent); return null; }
+      if (vazamentos().length) anotar('online', 'lista de salas sai da tela', vazamentos());
+      [...$('listaSalas').children].find((b) => b.textContent.includes('Mesa ' + partidaAtual)).click();
+      if (!(await esperar(() => $('telaOnline').dataset.etapa === 'confirmar'))) { anotar('online', 'tocar na sala da lista não abriu a confirmação', $('telaOnline').dataset.etapa); return null; }
+      $('btnAceitar').click();
+    }
     if (!(await esperar(() => !$('telaPartida').hidden && partidaOnline >= 1))) { anotar('online', 'partida online não começou'); return null; }
     // o robô adversário joga sozinho (lance legal sorteado) quando é a vez dele; confere de tempos em
     // tempos (assim não perde a vez nem se a partida começou antes de ele "prestar atenção")
@@ -1502,17 +1762,28 @@ async function roboTestador(semente, partidas) {
       async cair() {     // minha internet cai e volta
         const tr = sala && sala._transporte(); if (!tr || !tr.cair) return;
         tr.cair(); await dormir(200 + rnd() * 900); tr.voltar();
-        await esperar(() => sala && sala.conectado && $('vez').dataset.rede === 'on', 8000);
+        await esperar(() => sala && sala.conectado && $('vez').dataset.rede === 'on', 120000);
         if ($('vez').dataset.rede !== 'on') anotar('online', 'depois de cair e voltar, segue "desconectado"', $('status').textContent);
+      },
+      async advFora() {  // o adversário troca de app e volta: aparece "Esperando…" e some quando ele volta
+        if (!partidaOnlineRolando()) return;
+        adv.ausente(true);
+        const viu = await esperar(() => !!espera && /^Esperando /.test($('status').textContent), 5000);
+        if (!viu && partidaOnlineRolando()) anotar('online', 'adversário saiu da tela e não apareceu "Esperando"', $('status').textContent);
+        await dormir(100 + rnd() * 600);
+        adv.ausente(false);
+        const voltou = await esperar(() => !espera, 5000);
+        if (!voltou) anotar('online', 'adversário voltou e a espera não acabou', $('status').textContent);
+        if (!$('avisoOnline').hidden && $('avisoOnline').dataset.tipo !== 'inativo') { anotar('online', 'ficou um aviso aberto depois da volta', $('avisoTitulo').textContent); fecharAviso(); }
       },
       async recarregar() {   // fecho o app (ou recarrego a página) e volto pela sala salva
         if (!sala) return;
         const antes = L.positionKey(sala.estado ? sala.estado.estado : S);
         sala.fechar(); sala = null; partidaOnline = 0; seqOnline = 0;
         mostrarTela('telaInicio'); await dormir(100 + rnd() * 400);
-        if ($('btnRetomar').hidden) { anotar('online', 'botão "Voltar para a sala online" não apareceu depois de fechar'); return; }
+        if ($('cartaoRetomar').hidden) { anotar('online', 'cartão "Voltar para a sala" não apareceu depois de fechar o app'); return; }
         $('btnRetomar').click();
-        const voltou = await esperar(() => !$('telaPartida').hidden && partidaOnline >= 1 && sala && sala.adversarioOnline, 15000);
+        const voltou = await esperar(() => !$('telaPartida').hidden && partidaOnline >= 1 && sala && sala.adversarioOnline, 120000);
         if (!voltou) anotar('online', 'voltar para a sala depois de fechar o app não funcionou', { tela: $('telaOnline').dataset.etapa, erro: $('erroOnline').textContent });
         else if (L.positionKey(S) !== antes && !(sala.estado && L.positionKey(sala.estado.estado) === L.positionKey(S))) anotar('online', 'voltou para a sala com outro tabuleiro');
       },
@@ -1554,13 +1825,21 @@ async function roboTestador(semente, partidas) {
       Object.assign(log[log.length - 1], { resultado: fim || 'sem fim (limite de lances)', lancesAteAqui: lances });
       $('vitoria').hidden = true;
       if (online) {
-        // sair da sala de verdade: o outro é avisado e nada fica guardado no servidor
-        let saiu = false; online.adv.on('saiu', () => { saiu = true; });
-        irParaInicio(); await esperar(() => saiu, 5000);
+        // sair da sala: com a partida terminada, sai de vez (apaga tudo); sem terminar, a saída é
+        // temporária (dá para voltar) e o adversário encerra depois — no fim nada pode ficar no servidor
+        let saiu = null; online.adv.on('saiu', (x) => { saiu = x || {}; });
+        const terminou = !!fim;
+        irParaInicio(); await esperar(() => !!saiu, 5000);
         if (!saiu) anotar('online', 'o adversário não foi avisado da saída');
+        else if (!!saiu.temporario === terminou) anotar('online', terminou ? 'saída depois do fim da partida ficou como temporária' : 'saída no meio da partida não deixou voltar', saiu);
+        if (!terminou) {
+          if (!sessaoSalva()) anotar('online', 'saiu no meio da partida e a sala não ficou salva para voltar');
+          online.adv.encerrar(); esquecerSessao(); await dormir(60);
+        }
         const sobras = Object.keys(online.broker.retidos).filter((k) => k.indexOf(online.adv.topico) === 0 && !/presenca/.test(k));
         if (sobras.length) anotar('online', 'sobrou coisa guardada no servidor depois de sair', sobras);
-        clearInterval(online.timerAdv); online.adv.fechar();
+        if (Object.keys(online.broker.retidos).some((k) => k.indexOf(ON.LOBBY) === 0)) anotar('online', 'sobrou sala na lista de salas abertas');
+        clearInterval(online.timerAdv); online.adv.fechar(); fecharAviso();
         fabricaTransporte = (i) => ON.criarTransporteMqtt(ON.SERVIDORES[i]); opcoesSala = {};
       }
     }

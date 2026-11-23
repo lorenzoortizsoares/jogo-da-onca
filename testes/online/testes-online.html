@@ -101,9 +101,10 @@
       registrar('REG-010: assinatura não depende da ordem dos campos', ON.canonico({ b: 1, a: [2, { d: 3, c: 'x' }] }) === ON.canonico({ a: [2, { c: 'x', d: 3 }], b: 1 }));
 
       // queda e volta (testamento)
-      B._transporte().cair();
-      await esperar(function () { return !A.adversarioOnline; }, 400);
-      registrar('queda: o outro lado percebe na hora (testamento)', !A.adversarioOnline);
+      var viuQueda = false; A.on('presenca', function (v) { if (v === false) viuQueda = true; });   // à prova de tempo (o teste chegou a falhar de vez em quando)
+      var diagAntes = A._diag(); B._transporte().cair();
+      await esperar(function () { return viuQueda; }, 400);
+      registrar('queda: o outro lado percebe na hora (testamento)', viuQueda, { antes: diagAntes, depois: A._diag() });
       B._transporte().voltar();
       await esperar(function () { return A.adversarioOnline; }, 400);
       registrar('volta: o outro lado vê que voltou', A.adversarioOnline);
@@ -279,7 +280,7 @@
       var todas = bc.publicacoes.filter(function (p) { return p.topico.indexOf(rc.topico + '') === 0 && !p.opcoes.espiao; });
       registrar('privacidade: chat nunca fica guardado no servidor', todas.filter(function (p) { return /\/chat$/.test(p.topico); }).every(function (p) { return !p.opcoes.reter && p.opcoes.expiraSeg <= ON.EXPIRA_MSG_SEG; }) && !Object.keys(bc.retidos).some(function (t) { return /\/chat$/.test(t); }));
       registrar('privacidade: o que fica guardado tem validade (some sozinho em até 6 h)', todas.filter(function (p) { return p.opcoes.reter && p.msg; }).every(function (p) { return p.opcoes.expiraSeg > 0 && p.opcoes.expiraSeg <= ON.EXPIRA_RETIDO_SEG; }));
-      var camposPermitidos = { v: 1, criador: 1, convidado: 1, status: 1, servidor: 1, t: 1, partida: 1, seq: 1, estado: 1, lance: 1, autor: 1, tipo: 1, id: 1, trocar: 1, aceitar: 1, para: 1, online: 1, pub: 1, iv: 1, ct: 1, mac: 1 };
+      var camposPermitidos = { v: 1, nome: 1, publica: 1, apelido: 1, criador: 1, convidado: 1, status: 1, servidor: 1, t: 1, partida: 1, seq: 1, estado: 1, lance: 1, autor: 1, tipo: 1, id: 1, trocar: 1, aceitar: 1, para: 1, online: 1, pub: 1, iv: 1, ct: 1, mac: 1 };
       var estranhos = [];
       todas.forEach(function (p) { if (p.msg) Object.keys(p.msg).forEach(function (c) { if (!camposPermitidos[c]) estranhos.push(c); }); });
       registrar('privacidade: nenhum dado pessoal nas mensagens (só campos do jogo)', estranhos.length === 0, estranhos);
@@ -287,6 +288,70 @@
       await dormir(60);
       var sobras = Object.keys(bc.retidos).filter(function (t) { return t.indexOf(rc.topico + '') === 0 && !/\/chave\/espiao$/.test(t); });
       registrar('privacidade: quando saem da sala, nada fica guardado no servidor', sobras.length === 0, sobras);
+
+      // ================= APELIDOS, LISTA DE SALAS, SAIR E VOLTAR, ENCERRAR, FORA DA TELA =================
+      var bl = ON.criarBrokerMemoria();
+      var lobby = ON.criarLobby({ criarTransporte: function () { return bl.criarTransporte(); } });
+      await lobby.abrir();
+      var LA = nova(bl, 'lobA'), LB = nova(bl, 'lobB'), LP = nova(bl, 'lobP');
+      var rl = await LA.criar('D', null, { apelido: '  Ana Clara Souza da Silva ', nomeSala: 'Sala da Ana', publica: true });
+      await LP.criar('J', null, { apelido: 'Priv', nomeSala: 'Secreta', publica: false });
+      await esperar(function () { return lobby.salas.length >= 1; }, 500);
+      var naLista = lobby.salas.filter(function (x) { return x.codigo === rl.codigo; })[0];
+      registrar('lista: sala pública aparece com nome, apelido e lado de quem criou', naLista && naLista.nome === 'Sala da Ana' && naLista.apelido === 'Ana Clara So' && naLista.lado === 'D', lobby.salas);
+      registrar('lista: sala privada não aparece', lobby.salas.length === 1 && !lobby.salas.some(function (x) { return x.nome === 'Secreta'; }), lobby.salas);
+      registrar('apelido: limpo e cortado em ' + ON.LIMITE_APELIDO + ' letras', LA.apelidos.meu === 'Ana Clara So');
+      await LB.consultar(naLista.codigo, naLista.servidor); await LB.entrar(1500, 'Beto');
+      await esperar(function () { return LA.info.convidado && LB.estado && lobby.salas.length === 0; }, 800);
+      registrar('apelido: os dois veem o nome do outro', LA.apelidos.adversario === 'Beto' && LB.apelidos.adversario === 'Ana Clara So' && LB.apelidos.meu === 'Beto', { A: LA.apelidos, B: LB.apelidos });
+      registrar('lista: sala sai da lista quando o 2º jogador entra', lobby.salas.length === 0, lobby.salas);
+      LP.sair(); await dormir(30);
+      registrar('lista: nada da lista fica guardado no servidor', !Object.keys(bl.retidos).some(function (t) { return t.indexOf(ON.LOBBY) === 0; }), Object.keys(bl.retidos));
+
+      // fora da tela: o outro vê "fora" na hora e as batidas não desmentem
+      LB.ausente(true);
+      await esperar(function () { return !LA.adversarioOnline; }, 300);
+      await dormir(350);   // > 3 batidas
+      registrar('fora da tela: o outro vê na hora e continua vendo (batidas não desmentem)', !LA.adversarioOnline);
+      LB.ausente(false);
+      await esperar(function () { return LA.adversarioOnline; }, 400);
+      registrar('fora da tela: ao voltar, o outro vê de novo', LA.adversarioOnline);
+
+      // sair no meio da partida (temporário): a sala continua guardada e dá para voltar
+      var saiuInfo = null; LA.on('saiu', function (x) { saiuInfo = x; });
+      LB.sair({ temporario: true });
+      await esperar(function () { return saiuInfo; }, 400);
+      var salaGuardada = !!bl.retidos[rl.topico + 'sala'] && !!bl.retidos[rl.topico + 'estado'];
+      registrar('sair (temporário): o outro é avisado que pode voltar e a sala continua guardada', saiuInfo && saiuInfo.temporario === true && salaGuardada, { saiuInfo: saiuInfo, salaGuardada: salaGuardada });
+      var LB2 = nova(bl, 'lobB');
+      var volta = await LB2.reconectar(rl.codigo);
+      await esperar(function () { return LA.adversarioOnline && LB2.estado; }, 600);
+      registrar('voltar: quem saiu volta para a mesma partida e o outro vê', volta.ok && LB2.meuLado === 'J' && LB2.estado && LB2.estado.partida === 1 && LA.adversarioOnline, volta);
+
+      // inativo: sai como temporário e avisa o motivo
+      saiuInfo = null; LB2.sair({ temporario: true, inativo: true });
+      await esperar(function () { return saiuInfo; }, 400);
+      registrar('inativo: o outro é avisado do motivo', saiuInfo && saiuInfo.inativo === true && saiuInfo.temporario === true, saiuInfo);
+
+      // encerrar sem vencedor: apaga tudo e avisa quem voltar
+      var LB3 = nova(bl, 'lobB'), encerrou = false;
+      LB3.on('encerrada', function () { encerrou = true; });
+      await LB3.reconectar(rl.codigo);
+      LA.encerrar();
+      await esperar(function () { return encerrou; }, 400);
+      await dormir(30);
+      var sobrouL = Object.keys(bl.retidos).filter(function (t) { return t.indexOf(rl.topico) === 0 && !/presenca/.test(t); });
+      registrar('encerrar: o outro é avisado e nada fica guardado no servidor', encerrou && sobrouL.length === 0, sobrouL);
+      var LB4 = nova(bl, 'lobB');
+      var depois = await LB4.reconectar(rl.codigo);
+      registrar('encerrar: quem tentar voltar depois não acha a sala', depois.ok === false && depois.existe === false, depois);
+      LB3.fechar(); LB4.fechar(); lobby.fechar();
+
+      // privacidade: os novos campos (nome da sala, apelido, pública) são os únicos acrescentados
+      var camposL = { v: 1, nome: 1, publica: 1, criador: 1, convidado: 1, status: 1, servidor: 1, t: 1, partida: 1, seq: 1, estado: 1, lance: 1, autor: 1, tipo: 1, id: 1, trocar: 1, aceitar: 1, para: 1, online: 1, pub: 1, iv: 1, ct: 1, mac: 1, apelido: 1, temporario: 1, inativo: 1, codigo: 1, lado: 1 };
+      var estranhosL = [];
+      bl.publicacoes.forEach(function (p) { if (p.msg) Object.keys(p.msg).forEach(function (c) { if (!camposL[c]) estranhosL.push(c); }); });
+      registrar('privacidade: só campos do jogo (+ apelido e nome da sala escolhidos pela pessoa)', estranhosL.length === 0, estranhosL);
     } catch (e) {
       registrar('exceção: ' + (e && e.stack || e), false);
     }

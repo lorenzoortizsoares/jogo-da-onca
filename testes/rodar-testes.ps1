@@ -4,7 +4,7 @@
 # Saída: testes\relatorios\ultimo-relatorio.md (+ prints em testes\relatorios\prints)
 # Código de saída: 0 = tudo passou, 1 = alguma falha.
 # =====================================================================
-param([switch]$SemPrints, [switch]$Completo, [switch]$ServidorReal)
+param([switch]$SemPrints, [switch]$Completo, [switch]$ServidorReal, [int]$RoboPartidas = 9, [int]$EsperaMin = 15)
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -12,7 +12,20 @@ $raiz = Split-Path -Parent $PSScriptRoot
 $rel  = Join-Path $raiz 'testes\relatorios'
 $prints = Join-Path $rel 'prints'
 New-Item -ItemType Directory -Force $prints | Out-Null
-$perfil = Join-Path $env:TEMP 'onca-testes-chrome'
+
+# REG-016: duas rodadas ao mesmo tempo (o gancho automático e uma rodada manual) usavam o mesmo perfil
+# do Chrome e o mesmo arquivo temporário, e uma derrubava a outra ("sem resultado" em tudo).
+# Agora as rodadas entram numa fila (a 2ª espera a 1ª terminar) e cada uma tem os seus próprios arquivos.
+$fila = New-Object System.Threading.Mutex($false, 'Local\JogoDaOncaTestes')
+$naVez = $false
+try { $naVez = $fila.WaitOne([TimeSpan]::FromMinutes($EsperaMin)) } catch [System.Threading.AbandonedMutexException] { $naVez = $true }
+if (-not $naVez) { Write-Output 'OCUPADO: outra rodada de testes ainda está rodando (espere ela terminar).'; exit 3 }
+$perfil = Join-Path $env:TEMP "onca-testes-chrome-$PID"
+function Limpar-Rodada {
+  Remove-Item $perfil -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
+  try { $fila.ReleaseMutex() } catch { }
+}
 
 $chrome = @(
   "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
@@ -25,8 +38,8 @@ if (-not $chrome) { Write-Output 'ERRO: Chrome ou Edge não encontrado.'; exit 1
 function Url($caminho) { 'file:///' + ((Join-Path $raiz $caminho) -replace '\\', '/') }
 # O Chrome é um programa "de janela": chamado direto pelo PowerShell ele não devolve a saída
 # (falha REG-004). Por isso roda via Start-Process, esperando terminar e gravando a saída em arquivo.
-$tmpOut = Join-Path $env:TEMP 'onca-testes-saida.txt'
-$tmpErr = Join-Path $env:TEMP 'onca-testes-erros.txt'
+$tmpOut = Join-Path $env:TEMP "onca-testes-saida-$PID.txt"   # REG-016: arquivo próprio de cada rodada
+$tmpErr = Join-Path $env:TEMP "onca-testes-erros-$PID.txt"
 function Rodar-Chrome([string[]]$argumentos) {
   $base = @('--headless=new', "--user-data-dir=$perfil", '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist')
   $todos = ($base + $argumentos) | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }
@@ -96,6 +109,14 @@ Get-ChildItem (Join-Path $raiz 'codigo') -Recurse -File -Include *.js, *.html, *
   if ($t.Contains([string][char]0x2028) -or $t.Contains([string][char]0x2029)) { $invisiveis += $_.FullName.Substring($raiz.Length + 1) }
 }
 Registrar 'Varredura do código: sem caracteres invisíveis que quebram o JavaScript' ($invisiveis.Count -eq 0) ($(if ($invisiveis.Count) { 'Arquivos com U+2028/U+2029: ' + ($invisiveis -join ', ') } else { 'ok' }))
+
+# 1b2) REG-016: com esta rodada na vez, uma 2ª rodada ao mesmo tempo precisa esperar (aqui: desistir na hora
+# com "OCUPADO", código 3) em vez de atropelar esta — e os arquivos desta rodada são só dela.
+$t0Fila = Get-Date
+$segunda = & powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -SemPrints -EsperaMin 0 2>&1
+$codSegunda = $LASTEXITCODE
+$okFila = $codSegunda -eq 3 -and (($segunda -join ' ') -match 'OCUPADO') -and ((Get-Date) - $t0Fila).TotalSeconds -lt 30 -and $perfil -match "$PID" -and $tmpOut -match "$PID"
+Registrar 'REG-016 duas rodadas de testes ao mesmo tempo não se atropelam (fila)' $okFila ("2ª rodada: código $codSegunda, " + (($segunda | Select-Object -First 1) -join ' '))
 
 # 1c) REG-009: o download do som ambiente chegou a salvar uma PÁGINA HTML de erro (429) como ambiente.mp3.
 # Todo .mp3 em assets/sons precisa ser áudio MP3 de verdade (cabeçalho ID3 ou quadro MPEG), não texto/HTML.
@@ -167,7 +188,7 @@ Autoteste 'Front end: autoteste no celular (390x844)' ((Url 'testes\interface\mo
 # A semente muda a cada rodada (partidas diferentes); tudo vai para o catálogo testes\robo\CATALOGO.md.
 # Achou erro: a etapa falha, e o erro vira teste fixo REG-NNN (repetir: index.html?robo=1&semente=N).
 $semente = Get-Random -Minimum 1 -Maximum 999999
-$domRobo = Chrome-Dom ((Url 'index.html') + "?robo=1&partidas=9&semente=$semente") '1400,900' 8000000
+$domRobo = Chrome-Dom ((Url 'index.html') + "?robo=1&partidas=$RoboPartidas&semente=$semente") '1400,900' 8000000
 $tRobo = Decodificar ([regex]::Match($domRobo, '(?s)<pre id="selftest-report"[^>]*>(.*?)</pre>').Groups[1].Value)
 $okRobo = $tRobo -match '^ROBO PASSOU'
 $detRobo = 'sem relatório (o robô não terminou)'; $linhaCat = ''
@@ -219,8 +240,15 @@ foreach ($r in $resultados) {
   [void]$md.AppendLine('')
 }
 [System.IO.File]::WriteAllText((Join-Path $rel 'ultimo-relatorio.md'), $md.ToString(), (New-Object System.Text.UTF8Encoding($false)))
+# toda rodada que falha guarda uma cópia (falhas que aparecem "de vez em quando" não se perdem)
+if (($resultados | Where-Object { -not $_.Ok }).Count -gt 0) {
+  $pastaFalhas = Join-Path $rel 'falhas'
+  New-Item -ItemType Directory -Force $pastaFalhas | Out-Null
+  [System.IO.File]::WriteAllText((Join-Path $pastaFalhas ('relatorio-' + (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss') + '.md')), $md.ToString(), (New-Object System.Text.UTF8Encoding($false)))
+}
 
 Write-Output ''
+Limpar-Rodada
 if ($falhou -eq 0) { Write-Output "TUDO PASSOU ($($resultados.Count) etapas, ${dur}s). Relatório: testes\relatorios\ultimo-relatorio.md"; exit 0 }
 Write-Output "FALHOU: $falhou etapa(s). Veja testes\relatorios\ultimo-relatorio.md"
 exit 1

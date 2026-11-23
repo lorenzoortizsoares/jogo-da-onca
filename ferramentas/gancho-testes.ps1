@@ -35,7 +35,13 @@ if ($ativo -and (Ler $falhado) -eq $impressao) {                # já avisou e n
   exit 0
 }
 
-$saida = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $raiz 'testes\rodar-testes.ps1') -SemPrints 2>&1
+# REG-016: se já houver uma rodada de testes em andamento (ex.: uma rodada manual), não atropela:
+# avisa e deixa para a próxima vez (sem aprovar). O robô roda 4 partidas aqui para caber no tempo do gancho.
+$saida = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $raiz 'testes\rodar-testes.ps1') -SemPrints -RoboPartidas 4 -EsperaMin 0 2>&1
+if ($LASTEXITCODE -eq 3) {
+  Write-Output '{"systemMessage": "Jogo da Onça: outra rodada de testes já está rodando; o gancho testa de novo na próxima vez."}'
+  exit 0
+}
 if ($LASTEXITCODE -eq 0) {
   Set-Content -Path $aprovado -Value $impressao -Encoding ASCII
   if (Test-Path $falhado) { Remove-Item $falhado -Force }

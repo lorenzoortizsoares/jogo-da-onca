@@ -277,3 +277,29 @@ h2 { font-size: 26px; color: var(--palha-hi); margin-bottom: 6px; }
 
 /* ---------- autoteste ---------- */
 #selftest-report { position: fixed; z-index: 50; inset: auto 0 0 0; max-height: 50vh; overflow: auto; margin: 0; padding: 8px; background: #000; color: #9f9; font: 12px monospace; }
+
+/* ---------- online: voltar para a sala, apelido, lista de salas ---------- */
+.retomar {
+  margin: 14px 0 0; padding: 12px; border-radius: 14px;
+  border: 2px solid var(--uru-hi); background: rgba(184, 56, 30, .16); display: grid; gap: 8px;
+}
+.retomar-titulo { margin: 0; font-weight: 800; color: var(--palha-hi); }
+.retomar .nota { margin: 0; }
+.campo-texto {
+  width: 100%; min-height: 48px; padding: 8px 12px; border-radius: 12px;
+  border: 2px solid var(--line-2); background: rgba(0, 0, 0, .25); color: var(--palha-hi); font-size: 16px;
+}
+.campo-texto:focus { outline: 3px solid var(--ouro); outline-offset: 2px; border-color: transparent; }
+.campo-texto::placeholder { color: rgba(227, 207, 159, .32); }
+.opcoes-visib .lado { min-height: 64px; }
+.lista-salas { display: grid; gap: 8px; max-height: 46vh; overflow-y: auto; }
+.lista-salas:empty { display: none; }
+.sala-item {
+  display: grid; gap: 2px; width: 100%; padding: 12px 14px; text-align: left; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--line-2); background: rgba(227, 207, 159, .06); color: var(--palha);
+  font: inherit;
+}
+.sala-item strong { color: var(--palha-hi); font-size: 17px; overflow-wrap: anywhere; }
+.sala-item small { color: var(--palha-dim); font-size: 13px; }
+.sala-item:hover, .sala-item:focus-visible { border-color: var(--uru-hi); background: rgba(184, 56, 30, .18); outline: none; }
+#nomeConfirmar:not(:empty)::after { content: " · "; }

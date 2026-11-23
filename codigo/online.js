@@ -28,6 +28,11 @@
   var EXPIRA_MSG_SEG = 120;           // mensagens de passagem (lances avisos, chat) nunca ficam guardadas
   var LIMITE_CHAT = 200;              // caracteres por mensagem
   var INFO_CHAT = 'jogo-da-onca/chat/v1';
+  // lista de salas abertas (só as salas que quem criou marcou como "Pública")
+  var LOBBY = PREFIXO + 'lobby/';
+  var EXPIRA_LOBBY_SEG = 30 * 60;     // uma sala pública esperando some da lista em 30 min (é republicada enquanto espera)
+  var LIMITE_APELIDO = 12;            // apelido do jogador (cabe no texto da vez do celular — REG-003)
+  var LIMITE_NOME_SALA = 24;
 
   // ---------------------------------------------------------------- utilidades de criptografia
   function criptoDisponivel() { return !!(root.crypto && root.crypto.subtle && root.crypto.getRandomValues); }
@@ -44,6 +49,8 @@
     }
     return out.replace(/\s+/g, ' ').trim();
   }
+
+  function limparNome(txt, max) { return limparTexto(txt).slice(0, max || LIMITE_APELIDO).trim(); }
 
   function gerarCodigo(rng) {
     rng = rng || Math.random;
@@ -179,7 +186,7 @@
             cli.on('error', function (e) { if (!feito) { feito = true; try { cli.end(true); } catch (x) { /* */ } reject(e); } });
             cli.on('message', function (t, buf) {
               var s = buf ? buf.toString() : '';
-              if (!s) return;
+              if (!s) { aoMsg(t, null); return; }   // mensagem vazia = algo guardado foi apagado (ex.: sala saiu da lista)
               var o; try { o = JSON.parse(s); } catch (e) { return; }
               aoMsg(t, o);
             });
@@ -195,6 +202,8 @@
       assinar: function (filtro) { if (cli) cli.subscribe(filtro, { qos: 1 }); },
       aoMensagem: function (cb) { aoMsg = cb; },
       aoConexao: function (cb) { aoEst = cb; },
+      // volta a conectar na hora (o app voltou para a tela); sem isso o celular demora até perceber
+      reconectar: function () { if (cli && !cli.connected && !cli.reconnecting) { try { cli.reconnect(); } catch (e) { /* */ } } },
       desconectar: function () { if (cli) { try { cli.end(true); } catch (e) { /* */ } } cli = null; }
     };
   }
@@ -235,12 +244,13 @@
             var msg = copia(obj);
             publicacoes.push({ topico: t, msg: copia(msg), opcoes: copia(o || {}) });
             if (o && o.reter) { if (msg == null) delete retidos[t]; else retidos[t] = msg; }
-            if (msg != null) entregar(t, msg);
+            if (msg != null || (o && o.reter)) entregar(t, msg);   // apagar algo guardado também avisa quem está ouvindo
           },
           assinar: function (filtro) { c.filtros.push(filtro); entregarRetidos(c, filtro); },
           aoMensagem: function (cb) { c.aoMsg = cb; },
           aoConexao: function (cb) { c.aoEst = cb; },
           desconectar: function () { c.ligado = false; },
+          reconectar: function () {},
           // só para testes: queda de conexão (dispara o testamento) e volta
           cair: function () { if (!c.ligado) return; c.ligado = false; c.caido = true; if (c.will) entregar(c.will.topico, c.will.dados); c.aoEst(false); },
           voltar: function () { c.ligado = true; c.caido = false; c.aoEst(true); c.filtros.forEach(function (f) { entregarRetidos(c, f); }); }
@@ -292,7 +302,7 @@
       var subtle = root.crypto.subtle;
       s.par = subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']).then(function (par) {
         return subtle.exportKey('raw', par.publicKey).then(function (raw) {
-          if (s.encerrada) return par;
+          if (s.encerrada || s.fimSala) return par;
           s.minhaPub = paraB64(raw);
           publicar('chave/' + s.id, { id: s.id, pub: s.minhaPub }, true);
           derivar();
@@ -405,7 +415,7 @@
         if (msg.id === idAdversario() && msg.pub !== s.pubAdv) {
           s.pubAdv = msg.pub; s.chaveChat = null; derivar();
           // o adversário trocou de chave (recarregou): republico a minha, caso a guardada tenha sido apagada/sobrescrita
-          if (s.minhaPub) publicar('chave/' + s.id, { id: s.id, pub: s.minhaPub }, true);
+          if (s.minhaPub && !s.fimSala) publicar('chave/' + s.id, { id: s.id, pub: s.minhaPub }, true);
         }
         return;
       }
@@ -428,13 +438,29 @@
       s.ultimaBatida = agora();
       if (!s.adversarioOnline) { s.adversarioOnline = true; emitir('presenca', true); }
     }
-    function bater() { s.batidasEnviadas = (s.batidasEnviadas || 0) + 1; publicar('presenca/' + s.id, { id: s.id, online: true }); }
+    // fora da tela (app em segundo plano): avisa "fora" e não deixa as batidas dizerem o contrário
+    function bater() { s.batidasEnviadas = (s.batidasEnviadas || 0) + 1; publicar('presenca/' + s.id, { id: s.id, online: !s.ausente }); }
+
+    // ---- lista de salas abertas (só sala pública, só enquanto espera o 2º jogador)
+    function publicarLobby() {
+      if (!s.lobbyId || !s.transporte || !s.info || s.info.status !== 'aguardando') return;
+      s.transporte.publicar(LOBBY + s.lobbyId, {
+        codigo: s.codigo, nome: s.info.nome || '', apelido: s.info.criador.apelido || '', lado: s.info.criador.lado,
+        servidor: s.servidor, t: agora()
+      }, { reter: true, expiraSeg: EXPIRA_LOBBY_SEG });
+    }
+    function limparLobby() {
+      if (!s.lobbyId || !s.transporte) return;
+      s.transporte.publicar(LOBBY + s.lobbyId, null, { reter: true });
+      s.lobbyId = null;
+    }
 
     function tratarPedido(p) {
       if (p.tipo === 'entrar') {
         if (papel() !== 'criador') return;
         if (s.info.status === 'aguardando') {
-          s.info = Object.assign({}, s.info, { convidado: { id: p.id }, status: 'jogando' });
+          s.info = Object.assign({}, s.info, { convidado: { id: p.id, apelido: limparNome(p.apelido) }, status: 'jogando' });
+          limparLobby();          // a sala encheu: sai da lista de salas abertas
           publicar('sala', s.info, true);
           publicar('estado', { partida: 1, seq: 0, estado: o.initialState(), lance: null, autor: s.id }, true);
           marcarPresenca(p.id);   // REG-006: o pedido de entrada já prova que ele está online
@@ -451,7 +477,11 @@
       if (p.tipo === 'cheia') emitir('cheia', true);
       else if (p.tipo === 'revanche') emitir('pedido-revanche', { trocar: !!p.trocar });
       else if (p.tipo === 'revanche-resposta') emitir('resposta-revanche', { aceitar: !!p.aceitar });
-      else if (p.tipo === 'sair') { s.adversarioOnline = false; emitir('saiu', true); }
+      else if (p.tipo === 'sair') { s.adversarioOnline = false; emitir('saiu', { temporario: !!p.temporario, inativo: !!p.inativo }); }
+      else if (p.tipo === 'encerrada') {
+        // a partida acabou sem vencedor: apago a minha chave guardada e não publico mais nada da sala
+        s.fimSala = true; s.adversarioOnline = false; publicar('chave/' + s.id, null, true); emitir('encerrada', true);
+      }
     }
 
     function iniciarBatidas() {
@@ -461,8 +491,18 @@
       s.relogios.push(setInterval(function () {
         if (s.adversarioOnline && agora() - s.ultimaBatida > o.ausenciaMs) { s.adversarioOnline = false; emitir('presenca', false); }
       }, Math.max(250, Math.floor(o.batidaMs / 2))));
+      publicarLobby();
+      s.relogios.push(setInterval(publicarLobby, EXPIRA_LOBBY_SEG * 1000 / 3));   // sala pública esperando continua na lista
     }
     function pararBatidas() { s.relogios.forEach(clearInterval); s.relogios = []; }
+    // privacidade: a sala acabou -> apaga tudo o que ficou guardado no servidor
+    function apagarSala() {
+      var adv = idAdversario();
+      publicar('sala', null, true);
+      publicar('estado', null, true);
+      publicar('chave/' + s.id, null, true);
+      if (adv) publicar('chave/' + adv, null, true);
+    }
 
     function ligar(indice) {
       if (s.transporte) s.transporte.desconectar();
@@ -532,13 +572,20 @@
       },
 
       // cria uma sala nova; quem cria escolhe o lado
-      criar: function (lado, codigo) {
+      // extras: { apelido, nomeSala, publica } — sala pública aparece na lista de salas abertas
+      criar: function (lado, codigo, extras) {
+        var x = extras || {};
         s.codigo = codigo || gerarCodigo();
         return prepararSala().then(function () { return ligarAlgum([0, 1]); }).then(function () {
-          s.info = { v: 1, criador: { id: s.id, lado: lado === 'J' ? 'J' : 'D' }, convidado: null, status: 'aguardando', servidor: s.servidor, t: agora() };
+          s.info = {
+            v: 1, nome: limparNome(x.nomeSala, LIMITE_NOME_SALA), publica: !!x.publica,
+            criador: { id: s.id, lado: lado === 'J' ? 'J' : 'D', apelido: limparNome(x.apelido) },
+            convidado: null, status: 'aguardando', servidor: s.servidor, t: agora()
+          };
           publicar('sala', s.info, true);
           publicar('estado', null, true);   // limpa partida antiga com o mesmo código (improvável)
           prepararChave();
+          if (s.info.publica) { s.lobbyId = s.topico.slice(PREFIXO.length).replace(/\/$/, ''); publicarLobby(); }
           return { codigo: s.codigo, topico: s.topico };
         });
       },
@@ -566,7 +613,7 @@
         return prepararSala().then(proximo);
       },
       // depois de consultar: o convidado aceita e entra
-      entrar: function (tempoMs) {
+      entrar: function (tempoMs, apelido) {
         return new Promise(function (resolve, reject) {
           var feito = false;
           var fim = function (fn, v) { if (!feito) { feito = true; clearTimeout(t); fn(v); } };
@@ -574,7 +621,7 @@
           api.on('sala', function (info) { if (info.status === 'jogando' && info.convidado && info.convidado.id === s.id) fim(resolve, info); });
           api.on('cheia', function () { fim(reject, new Error('sala cheia')); });
           if (s.info && s.info.status === 'jogando' && papel()) { fim(resolve, s.info); return; }
-          publicar('pedido', { tipo: 'entrar', id: s.id });
+          publicar('pedido', { tipo: 'entrar', id: s.id, apelido: limparNome(apelido) });
         });
       },
       // volta para uma sala da qual este aparelho já faz parte (recarregou a página)
@@ -596,7 +643,7 @@
       responderRevanche: function (aceitar, trocar) {
         if (aceitar) {
           if (trocar && s.info) {
-            s.info = Object.assign({}, s.info, { criador: { id: s.info.criador.id, lado: oposto(s.info.criador.lado) } });
+            s.info = Object.assign({}, s.info, { criador: Object.assign({}, s.info.criador, { lado: oposto(s.info.criador.lado) }) });   // mantém o apelido
             publicar('sala', s.info, true);
           }
           var ant = s.estado || { partida: 0 };
@@ -604,19 +651,38 @@
         }
         publicar('pedido', { tipo: 'revanche-resposta', id: s.id, aceitar: !!aceitar });
       },
-      sair: function () {
+      // opcoes.temporario: saí no meio da partida e posso voltar (a sala continua guardada; o outro
+      // espera até 1 min + 1 min). Sem isso (partida acabou / ninguém entrou): apaga tudo do servidor.
+      sair: function (opcoes) {
         if (!s.transporte) return;
+        var op = opcoes || {};
         var jogador = !!papel(), adv = idAdversario();
-        publicar('pedido', { tipo: 'sair', id: s.id });
+        var temporario = !!op.temporario && jogador && !!adv && !!s.info && s.info.status === 'jogando';
+        publicar('pedido', { tipo: 'sair', id: s.id, temporario: temporario, inativo: !!op.inativo });
         publicar('presenca/' + s.id, { id: s.id, online: false });
-        if (jogador) {
-          // privacidade: a sala acabou -> apaga tudo o que ficou guardado no servidor
-          publicar('sala', null, true);
-          publicar('estado', null, true);
-          publicar('chave/' + s.id, null, true);
-          if (adv) publicar('chave/' + adv, null, true);
-        }
+        limparLobby();
+        if (jogador && !temporario) apagarSala();
         api.fechar();
+      },
+      // fim sem vencedor (o outro não voltou a tempo): avisa e apaga tudo o que ficou no servidor
+      encerrar: function () {
+        if (!s.transporte) return;
+        s.fimSala = true;
+        publicar('pedido', { tipo: 'encerrada', id: s.id });
+        limparLobby();
+        if (papel()) apagarSala();
+        api.fechar();
+      },
+      // o app saiu da tela (true) ou voltou (false)
+      ausente: function (fora) {
+        s.ausente = !!fora;
+        if (!s.transporte) return;
+        if (!fora && s.transporte.reconectar) s.transporte.reconectar();
+        bater();
+      },
+      get apelidos() {
+        var i = s.info || {}, eu = papel(), cri = (i.criador && i.criador.apelido) || '', conv = (i.convidado && i.convidado.apelido) || '';
+        return { meu: eu === 'criador' ? cri : eu === 'convidado' ? conv : '', adversario: eu === 'criador' ? conv : eu === 'convidado' ? cri : '' };
       },
       fechar: function () {
         s.encerrada = true;
@@ -633,6 +699,46 @@
     return api;
   }
 
+  // ------------------------------------------------------------------ lista de salas abertas
+  // Escuta os dois servidores (a sala pode estar no de reserva). Só leitura: não publica nada.
+  // opcoes: { criarTransporte(indice) }. Eventos: 'salas' (lista atualizada).
+  function criarLobby(opcoes) {
+    var salas = {}, cbs = [], transportes = [];
+    function valida(m) {
+      return m && typeof m === 'object' && codigoValido(m.codigo) && (m.lado === 'J' || m.lado === 'D') &&
+        (m.servidor === 0 || m.servidor === 1) && typeof m.t === 'number' && Date.now() - m.t < EXPIRA_LOBBY_SEG * 1000 + 60000;
+    }
+    function lista() {
+      return Object.keys(salas).map(function (k) { return salas[k]; })
+        .filter(function (m) { return Date.now() - m.t < EXPIRA_LOBBY_SEG * 1000 + 60000; })
+        .sort(function (a, b) { return b.t - a.t; }).slice(0, 30);
+    }
+    function avisar() { var l = lista(); cbs.forEach(function (cb) { cb(l); }); }
+    function chegou(topico, m) {
+      if (topico.indexOf(LOBBY) !== 0) return;
+      var id = topico.slice(LOBBY.length);
+      if (!m) { if (salas[id]) { delete salas[id]; avisar(); } return; }
+      if (!valida(m)) return;
+      salas[id] = { id: id, codigo: m.codigo, servidor: m.servidor, lado: m.lado, t: m.t,
+        nome: limparNome(m.nome, LIMITE_NOME_SALA), apelido: limparNome(m.apelido) };
+      avisar();
+    }
+    return {
+      abrir: function () {
+        var tentativas = [0, 1].map(function (i) {
+          var tr = opcoes.criarTransporte(i);
+          tr.aoMensagem(chegou);
+          tr.aoConexao(function () {});
+          return tr.conectar('lista-' + gerarId(), {}).then(function () { transportes.push(tr); tr.assinar(LOBBY + '+'); return true; }, function () { return false; });
+        });
+        return Promise.all(tentativas).then(function (r) { if (!r.some(Boolean)) throw new Error('sem conexão'); return lista(); });
+      },
+      on: function (nome, cb) { if (nome === 'salas') cbs.push(cb); },
+      get salas() { return lista(); },
+      fechar: function () { transportes.forEach(function (tr) { tr.desconectar(); }); transportes = []; cbs = []; }
+    };
+  }
+
   var OncaOnline = {
     PREFIXO: PREFIXO, ALFABETO: ALFABETO, SERVIDORES: SERVIDORES,
     EXPIRA_RETIDO_SEG: EXPIRA_RETIDO_SEG, EXPIRA_MSG_SEG: EXPIRA_MSG_SEG, LIMITE_CHAT: LIMITE_CHAT,
@@ -640,7 +746,8 @@
     formatarCodigo: formatarCodigo, oposto: oposto, casaTopico: casaTopico, limparTexto: limparTexto,
     criptoDisponivel: criptoDisponivel, paraB64: paraB64, deB64: deB64,
     derivarSala: derivarSala, hmacHex: hmacHex, assinatura: assinatura, canonico: canonico,
-    criarTransporteMqtt: criarTransporteMqtt, criarBrokerMemoria: criarBrokerMemoria, criarSala: criarSala,
+    criarTransporteMqtt: criarTransporteMqtt, criarBrokerMemoria: criarBrokerMemoria, criarSala: criarSala, criarLobby: criarLobby,
+    LOBBY: LOBBY, LIMITE_APELIDO: LIMITE_APELIDO, LIMITE_NOME_SALA: LIMITE_NOME_SALA, limparNome: limparNome,
     carregarMqtt: carregarMqtt
   };
   root.OncaOnline = OncaOnline;
